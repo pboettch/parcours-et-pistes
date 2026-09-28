@@ -1,0 +1,19 @@
+# Dart / Flutter
+.dart_tool/
+.packages
+build/
+pubspec_overrides.yaml
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Claude Code: per-user local settings are not shared
+.claude/settings.local.json
+
+# Local broker data / secrets
+tools/broker/data/
+tools/broker/log/
+tools/broker/certs/*.key

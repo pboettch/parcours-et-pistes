@@ -1,0 +1,2 @@
+- [GPX trail app project](project-gpx-trail-app.md) — Parcours et Pistes: encrypted RU/Man-Trailing trail sharing over MQTT, goals + core-lib decisions
+- [Repo conventions](feedback-repo-conventions.md) — memories/Claude scripts live in repo `.claude/`, git-managed, commit often
