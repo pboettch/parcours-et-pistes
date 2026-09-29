@@ -18,7 +18,8 @@ ArgParser _common([ArgParser? p]) => (p ?? ArgParser())
   ..addOption('user', help: 'Broker username')
   ..addOption('broker-password', help: 'Broker password')
   ..addOption('identity', help: 'Identity seed file (default: ${_defaultIdentityPath()})')
-  ..addOption('password', abbr: 'p', help: 'Project password (or env PEP_PASSWORD, else prompt)');
+  ..addOption('password', abbr: 'p', help: 'Project password (or env PEP_PASSWORD, else prompt)')
+  ..addOption('device', help: 'Device id for positions (several devices of one identity)');
 
 /// Looks an option up on the command first, then globally.
 typedef _Opt = String? Function(String name);
@@ -28,6 +29,8 @@ Future<void> main(List<String> argv) async {
 
   parser
     ..addCommand('id', _common())
+    ..addCommand('identity', _common()..addOption('passphrase', help: 'Backup passphrase (else prompt)'))
+    ..addCommand('owner', _common())
     ..addCommand(
       'create',
       _common()
@@ -46,7 +49,8 @@ Future<void> main(List<String> argv) async {
         ..addOption('gpx', mandatory: true)
         ..addOption('id', help: 'Update this track id')
         ..addOption('name', help: 'Set the GPX metadata name')
-        ..addOption('description', help: 'Set the GPX metadata description'),
+        ..addOption('description', help: 'Set the GPX metadata description')
+        ..addMultiOption('visible-to', help: 'Member ids allowed to see the track (default: everyone)'),
     )
     ..addCommand('rm', _common())
     ..addCommand('export', _common()..addOption('out', defaultsTo: '.'))
@@ -87,6 +91,23 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
   switch (cmd.name) {
     case 'id':
       print(me.id);
+      stderr.writeln('fingerprint ${me.fingerprint}');
+      return;
+
+    case 'identity':
+      // Export: prints a passphrase-protected backup. Import: replaces the
+      // identity file with the one from a backup.
+      final passphrase = cmd.option('passphrase') ?? _prompt('backup passphrase: ');
+      switch (rest) {
+        case ['export']:
+          print(IdentityBackup.export(crypto, me, passphrase));
+        case ['import', final backup]:
+          final id = IdentityBackup.import(crypto, backup, passphrase);
+          _saveIdentity(id, opt('identity') ?? _defaultIdentityPath());
+          print(id.id);
+        default:
+          throw const FormatPepException('usage: pep identity export | import <backup>');
+      }
       return;
 
     case 'create':
@@ -119,6 +140,7 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
     identity: me,
     link: link,
     password: _password(opt),
+    deviceId: opt('device'),
   );
   final extra = rest.skip(1).toList();
 
@@ -134,6 +156,7 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
       final t = await s.publishTrack(
         id: cmd.option('id'),
         gpx: _readGpx(cmd.option('gpx')!, name: cmd.option('name'), description: cmd.option('description')),
+        visibleTo: cmd.multiOption('visible-to').isEmpty ? null : cmd.multiOption('visible-to').toSet(),
       );
       print('${t.id} rev ${t.rev}');
     case 'rm':
@@ -165,6 +188,18 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
         throw const FormatPepException('usage: pep editor <link> add|remove <member id>');
       }
       extra[0] == 'add' ? await s.addEditor(extra[1]) : await s.removeEditor(extra[1]);
+    case 'owner':
+      switch (extra) {
+        case ['offer', final member]:
+          await s.offerOwnership(member);
+        case ['cancel']:
+          await s.cancelOwnershipOffer();
+        case ['accept']:
+          await s.acceptOwnership();
+          print('you are now the owner');
+        default:
+          throw const FormatPepException('usage: pep owner <link> offer -- <member> | cancel | accept');
+      }
     case 'passwd':
       await s.changePassword(cmd.option('new')!);
     case 'delete':
@@ -202,6 +237,8 @@ Future<void> _watch(ProjectSession s) async {
         );
       case PositionRemoved(:final memberId):
         print('$t position ${_who(s, memberId)} gone');
+      case OwnershipOffered(:final fromOwnerId):
+        print('$t ownership offered to you by ${_short(fromOwnerId)}');
       case PasswordChanged():
         print('$t password changed, session locked');
         stop();
@@ -227,7 +264,8 @@ void _printInfo(ProjectSession s) {
 
 void _printTracks(ProjectSession s) {
   for (final t in s.tracks.values) {
-    print('track    ${t.id} rev ${t.rev} "${t.name ?? ''}" (${_gpxSummary(t.gpx)})');
+    final vis = t.visibleTo == null ? '' : ' visible to ${t.visibleTo!.map(_short).join(', ')}';
+    print('track    ${t.id} rev ${t.rev} "${t.name ?? ''}" (${_gpxSummary(t.gpx)})$vis');
   }
 }
 
@@ -255,10 +293,10 @@ Transport _transport(_Opt opt, JoinLink? link) => Mqtt5Transport(
   ),
 );
 
-String _password(_Opt opt) {
-  final p = opt('password') ?? Platform.environment['PEP_PASSWORD'];
-  if (p != null) return p;
-  stderr.write('project password: ');
+String _password(_Opt opt) => opt('password') ?? Platform.environment['PEP_PASSWORD'] ?? _prompt('project password: ');
+
+String _prompt(String label) {
+  stderr.write(label);
   stdin.echoMode = false;
   try {
     return stdin.readLineSync(encoding: utf8) ?? '';
@@ -278,11 +316,16 @@ Identity _loadIdentity(PepCrypto c, String path) {
   final f = File(path);
   if (f.existsSync()) return Identity.fromSeed(c, unb64u(f.readAsStringSync().trim()));
   final id = Identity.generate(c);
+  _saveIdentity(id, path);
+  stderr.writeln('created identity ${id.id} in $path');
+  return id;
+}
+
+void _saveIdentity(Identity id, String path) {
+  final f = File(path);
   f.parent.createSync(recursive: true);
   f.writeAsStringSync('${b64u(id.exportSeed())}\n');
   if (!Platform.isWindows) Process.runSync('chmod', ['600', path]);
-  stderr.writeln('created identity ${id.id} in $path');
-  return id;
 }
 
 /// Reads a GPX file; sets the metadata name/description when given, and the
@@ -303,16 +346,19 @@ Never _usage(ArgParser p, [String? error]) {
   stderr.writeln('''usage: pep [options] <command> [args]
 
 commands:
-  id                                  print this device's member id
+  id                                  print this identity's member id (and fingerprint)
+  identity export | import <backup>   passphrase-protected identity backup (copy to other devices)
   create --name N [--discipline ru|mt] [--gpx f]...   create a project, print its join link
   info <link>                         show project and tracks
   watch <link>                        follow tracks, members and positions live
-  push <link> --gpx f [--id T] [--name N]   publish (or update) a track (owner/editor)
+  push <link> --gpx f [--id T] [--name N] [--visible-to M]...
+                                      publish (or update) a track (owner/editor)
   rm <link> <track id>                delete a track (owner/editor)
   export <link> [--out dir]           write all tracks as .gpx files
   pos <link> <lat> <lon> [--acc m]    share a position
   name <link> <display name>          set your display name
   editor <link> add|remove -- <member>  manage editors (owner; "--" because ids may start with "-")
+  owner <link> offer -- <member> | cancel | accept   transfer the project ownership
   passwd <link> --new P               change the project password (owner)
   delete <link>                       delete the project from the broker (owner)
 

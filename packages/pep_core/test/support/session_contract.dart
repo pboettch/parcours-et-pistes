@@ -313,6 +313,92 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       expect(a.tracks, isEmpty);
     });
 
+    test('track visibility: hidden tracks are invisible to other members', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      final b = await join(o, bobId);
+      final hidden = await o.publishTrack(gpx: named(gpxA, 'for alice'), visibleTo: {aliceId.id});
+      expect(hidden.visibleTo, {aliceId.id, ownerId.id});
+      final open = await o.publishTrack(gpx: named(gpxB, 'for everyone'));
+      expect(open.visibleTo, isNull);
+      await eventually(() => a.tracks.length == 2 && b.tracks.length == 1);
+      expect(b.tracks.keys, [open.id]);
+      expect(a.tracks[hidden.id]!.name, 'for alice');
+      // Sharing it with bob later.
+      await o.publishTrack(id: hidden.id, gpx: named(gpxA, 'for alice'), visibleTo: {aliceId.id, bobId.id});
+      await eventually(() => b.tracks.containsKey(hidden.id));
+      expect(events[b]!.whereType<TrackUpdated>().map((e) => e.track.id), contains(hidden.id));
+    });
+
+    test('positions from several devices of one member', () async {
+      final o = await create();
+      final phone = track(
+        await ProjectSession.join(
+          crypto: c,
+          transport: h.transport(),
+          identity: aliceId,
+          link: JoinLink.parse(o.joinLink.toUri()),
+          password: 'pw-1',
+          clock: h.clock,
+          deviceId: 'phone',
+        ),
+      );
+      final watch = track(
+        await ProjectSession.join(
+          crypto: c,
+          transport: h.transport(),
+          identity: aliceId,
+          link: JoinLink.parse(o.joinLink.toUri()),
+          password: 'pw-1',
+          clock: h.clock,
+          deviceId: 'watch',
+        ),
+      );
+      await phone.publishPosition(Position(lat: 45.1, lon: 5.1, time: now()));
+      await eventually(() => o.positions[aliceId.id]?.lat == 45.1);
+      if (h.clock != null) h.advance(const Duration(seconds: 1));
+      await watch.publishPosition(Position(lat: 45.2, lon: 5.2, time: now()));
+      await eventually(() => o.positions[aliceId.id]?.lat == 45.2, reason: 'latest device wins');
+      expect(o.channel.items(PepCollections.position), hasLength(2));
+      await watch.clearPosition();
+      await eventually(() => o.positions[aliceId.id]?.lat == 45.1, reason: 'phone position still shared');
+      expect(events[o]!.whereType<PositionRemoved>(), isEmpty);
+      await phone.clearPosition();
+      await eventually(() => !o.positions.containsKey(aliceId.id));
+      await eventually(() => events[o]!.whereType<PositionRemoved>().single.memberId == aliceId.id);
+    });
+
+    test('ownership transfer at project level', () async {
+      final o = await create();
+      final t = await o.publishTrack(gpx: named(gpxA, 'by first owner'));
+      final a = await join(o, aliceId);
+      await o.offerOwnership(aliceId.id);
+      await eventually(() => events[a]!.whereType<OwnershipOffered>().isNotEmpty);
+      expect(a.ownershipOfferedToMe, isTrue);
+      await a.acceptOwnership();
+      expect(a.isOwner, isTrue);
+      await eventually(() => o.project.ownerId == aliceId.id);
+      expect(o.isOwner, isFalse);
+      expect(o.canEditTracks, isTrue, reason: 'former owner becomes an editor');
+      expect(o.project.editors, contains(ownerId.id));
+      expect(a.project.name, 'Forêt de Chambaran');
+      await a.updateProject(name: 'Renamed by the new owner');
+      await eventually(() => o.project.name == 'Renamed by the new owner');
+      await expectLater(o.updateProject(name: 'x'), throwsA(isA<AuthorizationException>()));
+      final b = await join(a, bobId);
+      expect(b.tracks[t.id]!.signerId, ownerId.id);
+      expect(b.project.ownerId, aliceId.id);
+    });
+
+    test('member events carry member ids, not topic pseudonyms', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      await a.setMemberName('Alice');
+      await eventually(() => events[o]!.whereType<MemberUpdated>().any((e) => e.memberId == aliceId.id));
+      await o.changePassword('pw-2', kdf: fastKdf(c));
+      await eventually(() => events[o]!.whereType<MemberRemoved>().any((e) => e.memberId == aliceId.id));
+    });
+
     test('nothing readable on the broker', () async {
       final log = h.log;
       if (log == null) return markTestSkipped('broker log not observable');
@@ -328,6 +414,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
         for (final secret in ['Chambaran', 'Trail name', 'Secret forest', 'Alice', '45.12', 'samedi', 'cuir']) {
           expect(text.contains(secret), isFalse, reason: '"$secret" leaked on $topic');
         }
+        expect(topic.contains(aliceId.id) || topic.contains(ownerId.id), isFalse, reason: 'member id in $topic');
       }
     });
   });

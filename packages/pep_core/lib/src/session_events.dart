@@ -54,6 +54,14 @@ class PositionRemoved extends SessionEvent {
   final String memberId;
 }
 
+/// The owner offered the project ownership to this member; take it over with
+/// `ProjectSession.acceptOwnership`.
+class OwnershipOffered extends SessionEvent {
+  const OwnershipOffered(this.fromOwnerId);
+
+  final String fromOwnerId;
+}
+
 /// The owner changed the project password. The session is locked until
 /// `ProjectSession.unlock` is called with the new password.
 class PasswordChanged extends SessionEvent {
