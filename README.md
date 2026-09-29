@@ -1,6 +1,6 @@
 # Parcours et Pistes
 
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/pboettch/parcours-et-pistes/actions/workflows/ci.yml/badge.svg)](https://github.com/pboettch/parcours-et-pistes/actions/workflows/ci.yml)
 
 Share search-dog trails — *Recherche Utilitaire* (RU) and *Man Trailing* (MT) — between a
 project creator and participants, with live position sharing. Available (later) for iOS,
