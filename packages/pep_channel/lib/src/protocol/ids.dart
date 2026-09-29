@@ -5,8 +5,8 @@ import '../errors.dart';
 final _uuidRe = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
 final _levelRe = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
 
-/// Random UUID v4 from libsodium's CSPRNG. Project ids are secrets: they are the
-/// only thing protecting a project's (encrypted) topics from being found.
+/// Random UUID v4 from libsodium's CSPRNG. Channel ids are secrets: they are the
+/// only thing protecting a channel's (encrypted) topics from being found.
 String newUuid(PepCrypto c) {
   final b = c.randomBytes(16);
   b[6] = (b[6] & 0x0f) | 0x40;
@@ -16,15 +16,15 @@ String newUuid(PepCrypto c) {
       '${h.substring(16, 20)}-${h.substring(20)}';
 }
 
-/// Random track id (16 chars, topic-safe).
-String newTrackId(PepCrypto c) => b64u(c.randomBytes(12));
+/// Random item id (16 chars, topic-safe).
+String newItemId(PepCrypto c) => b64u(c.randomBytes(12));
 
-bool isProjectId(String s) => _uuidRe.hasMatch(s);
+bool isChannelId(String s) => _uuidRe.hasMatch(s);
 
-/// Track and member ids: safe as a single MQTT topic level.
+/// Item ids (and member ids): safe as a single MQTT topic level.
 bool isTopicId(String s) => _levelRe.hasMatch(s);
 
-String checkProjectId(String s) =>
-    isProjectId(s) ? s : throw FormatPepException('invalid project id "$s"');
+String checkChannelId(String s) =>
+    isChannelId(s) ? s : throw FormatPepException('invalid channel id "$s"');
 
 String checkTopicId(String s) => isTopicId(s) ? s : throw FormatPepException('invalid id "$s"');

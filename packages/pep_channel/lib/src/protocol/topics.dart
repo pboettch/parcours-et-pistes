@@ -1,40 +1,51 @@
 import '../errors.dart';
 import 'ids.dart';
 
-enum TopicKind { meta, project, track, member, position }
+enum TopicKind { meta, acl, item, sync }
 
-/// A parsed project topic.
+/// A parsed channel topic.
 class TopicRef {
-  const TopicRef(this.kind, [this.id]);
+  const TopicRef(this.kind, {this.collection, this.id});
 
   final TopicKind kind;
 
-  /// Track or member id, for `track`, `member` and `position` topics.
+  /// Collection name (items only).
+  final String? collection;
+
+  /// Item id (items) or nonce (sync).
   final String? id;
 
   @override
-  bool operator ==(Object other) => other is TopicRef && other.kind == kind && other.id == id;
+  bool operator ==(Object other) =>
+      other is TopicRef && other.kind == kind && other.collection == collection && other.id == id;
 
   @override
-  int get hashCode => Object.hash(kind, id);
+  int get hashCode => Object.hash(kind, collection, id);
 
   @override
-  String toString() => 'TopicRef($kind, $id)';
+  String toString() => 'TopicRef($kind, $collection, $id)';
 }
 
-/// Topic layout of one project:
+final _collectionRe = RegExp(r'^[a-z][a-z0-9_]{0,31}$');
+
+/// Names that cannot be used as collections.
+const reservedTopicNames = {'meta', 'acl', 'sync'};
+
+bool isCollectionName(String s) => _collectionRe.hasMatch(s) && !reservedTopicNames.contains(s);
+
+String checkCollection(String s) =>
+    isCollectionName(s) ? s : throw FormatPepException('invalid collection name "$s"');
+
+/// Topic layout of one channel:
 ///
 /// ```text
-/// <base>/<uuid>/meta             plaintext: format version, KDF params, key check
-/// <base>/<uuid>/project          owner-signed project document
-/// <base>/<uuid>/track/<id>       owner- or editor-signed track (or tombstone)
-/// <base>/<uuid>/member/<id>      member profile, signed by that member
-/// <base>/<uuid>/pos/<id>         live position, signed by that member, expires
-/// <base>/<uuid>/sync/<nonce>     empty non-retained barrier probes
+/// <base>/<uuid>/meta               owner-signed plaintext: KDF params, key check
+/// <base>/<uuid>/acl                owner-signed access list (editors, collections)
+/// <base>/<uuid>/<collection>/<id>  sealed items
+/// <base>/<uuid>/sync/<nonce>       empty non-retained barrier probes
 /// ```
-class ProjectTopics {
-  ProjectTopics(String projectId, {this.base = defaultBase})
-      : projectId = checkProjectId(projectId) {
+class ChannelTopics {
+  ChannelTopics(String channelId, {this.base = defaultBase}) : channelId = checkChannelId(channelId) {
     if (base.isEmpty || base.contains(RegExp(r'[#+]')) || base.startsWith('/') || base.endsWith('/')) {
       throw FormatPepException('invalid topic base "$base"');
     }
@@ -43,38 +54,29 @@ class ProjectTopics {
   static const defaultBase = 'pep/v1';
 
   final String base;
-  final String projectId;
+  final String channelId;
 
-  String get _root => '$base/$projectId';
+  String get _root => '$base/$channelId';
 
-  /// Subscription filter for everything in the project (literal UUID, no
+  /// Subscription filter for everything in the channel (literal UUID, no
   /// wildcard above it).
   String get all => '$_root/#';
   String get meta => '$_root/meta';
-  String get project => '$_root/project';
-  String track(String id) => '$_root/track/${checkTopicId(id)}';
-  String member(String id) => '$_root/member/${checkTopicId(id)}';
-  String position(String id) => '$_root/pos/${checkTopicId(id)}';
-
-  /// Barrier probe topic (empty, non-retained messages; see `ProjectSession.sync`).
+  String get acl => '$_root/acl';
+  String item(String collection, String id) => '$_root/${checkCollection(collection)}/${checkTopicId(id)}';
   String sync(String nonce) => '$_root/sync/${checkTopicId(nonce)}';
 
-  /// Returns null for topics outside this project or with an unknown layout.
+  /// Returns null for topics outside this channel or with an unknown layout.
   TopicRef? parse(String topic) {
     if (!topic.startsWith('$_root/')) return null;
     final parts = topic.substring(_root.length + 1).split('/');
-    switch (parts) {
-      case ['meta']:
-        return const TopicRef(TopicKind.meta);
-      case ['project']:
-        return const TopicRef(TopicKind.project);
-      case ['track', final id] when isTopicId(id):
-        return TopicRef(TopicKind.track, id);
-      case ['member', final id] when isTopicId(id):
-        return TopicRef(TopicKind.member, id);
-      case ['pos', final id] when isTopicId(id):
-        return TopicRef(TopicKind.position, id);
-    }
-    return null;
+    return switch (parts) {
+      ['meta'] => const TopicRef(TopicKind.meta),
+      ['acl'] => const TopicRef(TopicKind.acl),
+      ['sync', final n] when isTopicId(n) => TopicRef(TopicKind.sync, id: n),
+      [final c, final id] when isCollectionName(c) && isTopicId(id) =>
+        TopicRef(TopicKind.item, collection: c, id: id),
+      _ => null,
+    };
   }
 }

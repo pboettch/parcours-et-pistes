@@ -1,7 +1,7 @@
 @Tags(['broker'])
 library;
 
-import 'package:pep_core/pep_core.dart';
+import 'package:pep_channel/pep_channel.dart';
 import 'package:test/test.dart';
 
 import 'support/broker.dart';

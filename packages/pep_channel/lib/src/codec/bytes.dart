@@ -37,8 +37,9 @@ class ByteWriter {
   }
 
   void u32(int v) {
-    u16(v >> 16);
-    u16(v);
+    if (v < 0 || v > 0xffffffff) throw ArgumentError.value(v, 'u32');
+    u16(v ~/ 0x10000);
+    u16(v % 0x10000);
   }
 
   void bytes(List<int> v) => _b.add(v);

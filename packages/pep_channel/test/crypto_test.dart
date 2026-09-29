@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:pep_core/pep_core.dart';
-import 'package:pep_core/src/codec/compression.dart';
+import 'package:pep_channel/pep_channel.dart';
+import 'package:pep_channel/src/codec/compression.dart';
 import 'package:test/test.dart';
 
 import 'support/crypto.dart';
@@ -80,6 +80,7 @@ void main() {
     late Identity me;
     late Envelope env;
     const topic = 'pep/v1/abc/track/t1';
+    final t0 = DateTime.utc(2026, 9, 29, 12, 0, 0, 123);
 
     setUpAll(() {
       key = ProjectKey.derive(c, 'secret', fastKdf(c));
@@ -88,9 +89,10 @@ void main() {
     });
 
     final big = Uint8List.fromList(utf8.encode('<gpx>${'<trkpt lat="45.1" lon="5.7"/>' * 500}</gpx>'));
+    final big0 = utf8Bytes('x');
 
     test('round trip, compressed payload is much smaller', () {
-      final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me);
+      final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me, rev: 1, time: t0);
       expect(sealed.length, lessThan(big.length ~/ 10));
       final o = env.open(key: key.dataKey, topic: topic, data: sealed);
       expect(o.body, big);
@@ -98,36 +100,53 @@ void main() {
       expect(o.signerId, me.id);
     });
 
+    test('signed header: revision, time, tombstone', () {
+      final big = DateTime.utc(2100, 1, 1, 0, 0, 0, 999);
+      final sealed = env.seal(
+          key: key.dataKey, topic: topic, body: Uint8List(0), signer: me, rev: 0xfffffffe, time: big, deleted: true);
+      final o = env.open(key: key.dataKey, topic: topic, data: sealed);
+      expect(o.rev, 0xfffffffe);
+      expect(o.time, big);
+      expect(o.deleted, isTrue);
+      expect(o.body, isEmpty);
+      final live = env.open(key: key.dataKey, topic: topic, data: env.seal(key: key.dataKey, topic: topic, body: big0, signer: me, rev: 7, time: t0));
+      expect(live.rev, 7);
+      expect(live.time, t0);
+      expect(live.deleted, isFalse);
+      expect(() => env.seal(key: key.dataKey, topic: topic, body: big0, signer: me, rev: -1, time: t0), throwsArgumentError);
+      expect(() => env.seal(key: key.dataKey, topic: topic, body: big0, signer: me, rev: 0x100000000, time: t0), throwsArgumentError);
+    });
+
     test('small and empty bodies', () {
       for (final body in [Uint8List(0), Uint8List.fromList([42])]) {
-        final sealed = env.seal(key: key.dataKey, topic: topic, body: body, signer: me);
+        final sealed = env.seal(key: key.dataKey, topic: topic, body: body, signer: me, rev: 1, time: t0);
         expect(env.open(key: key.dataKey, topic: topic, data: sealed).body, body);
       }
     });
 
     test('ciphertext does not leak plaintext and nonces differ', () {
       final body = utf8Bytes('Secret trail near the old mill');
-      final a = env.seal(key: key.dataKey, topic: topic, body: body, signer: me, compress: false);
-      final b = env.seal(key: key.dataKey, topic: topic, body: body, signer: me, compress: false);
+      final a = env.seal(key: key.dataKey, topic: topic, body: body, signer: me, rev: 1, time: t0, compress: false);
+      final b = env.seal(key: key.dataKey, topic: topic, body: body, signer: me, rev: 1, time: t0, compress: false);
       expect(latin1.decode(a).contains('Secret'), isFalse);
       expect(a, isNot(b));
     });
 
     test('wrong key fails', () {
       final other = ProjectKey.derive(c, 'other', fastKdf(c));
-      final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me);
+      final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me, rev: 1, time: t0);
       expect(() => env.open(key: other.dataKey, topic: topic, data: sealed),
           throwsA(isA<DecryptionException>()));
     });
 
     test('wrong topic fails (no replay onto another topic)', () {
-      final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me);
+      final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me, rev: 1, time: t0);
       expect(() => env.open(key: key.dataKey, topic: 'pep/v1/abc/track/t2', data: sealed),
           throwsA(isA<DecryptionException>()));
     });
 
     test('every flipped byte is detected', () {
-      final sealed = env.seal(key: key.dataKey, topic: topic, body: utf8Bytes('hello world'), signer: me);
+      final sealed = env.seal(key: key.dataKey, topic: topic, body: utf8Bytes('hello world'), signer: me, rev: 1, time: t0);
       for (var i = 0; i < sealed.length; i++) {
         final t = Uint8List.fromList(sealed)..[i] ^= 0x01;
         expect(() => env.open(key: key.dataKey, topic: topic, data: t),
@@ -136,7 +155,7 @@ void main() {
     });
 
     test('truncated / garbage input', () {
-      final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me);
+      final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me, rev: 1, time: t0);
       for (final bad in [Uint8List(0), Uint8List.sublistView(sealed, 0, 10), utf8Bytes('hello')]) {
         expect(() => env.open(key: key.dataKey, topic: topic, data: bad),
             throwsA(isA<PepException>()));

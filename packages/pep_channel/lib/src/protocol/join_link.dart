@@ -3,20 +3,20 @@ import '../errors.dart';
 import 'ids.dart';
 import 'topics.dart';
 
-/// Invitation to a project. The password is NOT part of the link and must be
+/// Invitation to a channel (a project). The password is NOT part of the link and must be
 /// shared through another channel.
 ///
 /// Everything lives in the URL fragment, which browsers never send to servers:
 /// `<prefix>#p=<uuid>&o=<owner id>[&b=<broker url>][&t=<topic base>]`
 class JoinLink {
   JoinLink({
-    required String projectId,
+    required String channelId,
     required this.ownerId,
     this.broker,
-    this.topicBase = ProjectTopics.defaultBase,
-  }) : projectId = checkProjectId(projectId) {
+    this.topicBase = ChannelTopics.defaultBase,
+  }) : channelId = checkChannelId(channelId) {
     publicKeyFromId(ownerId); // validates
-    ProjectTopics(projectId, base: topicBase); // validates base
+    ChannelTopics(channelId, base: topicBase); // validates base
     if (broker != null) _checkBroker(broker!);
   }
 
@@ -34,17 +34,17 @@ class JoinLink {
       throw const FormatPepException('invalid join link');
     }
     final p = q['p'], o = q['o'];
-    if (p == null || o == null) throw const FormatPepException('join link lacks project or owner');
-    return JoinLink(projectId: p, ownerId: o, broker: q['b'], topicBase: q['t'] ?? ProjectTopics.defaultBase);
+    if (p == null || o == null) throw const FormatPepException('join link lacks channel id or owner');
+    return JoinLink(channelId: p, ownerId: o, broker: q['b'], topicBase: q['t'] ?? ChannelTopics.defaultBase);
   }
 
   /// Default link prefix (app deep link). Apps may use a web URL instead.
   static const defaultPrefix = 'parcoursetpistes://join';
 
-  final String projectId;
+  final String channelId;
 
-  /// Member id (public key) of the project owner: the trust anchor used to
-  /// verify the project document.
+  /// Member id (public key) of the channel owner: the trust anchor used to
+  /// verify the metadata and the access list.
   final String ownerId;
 
   /// Broker URL (`mqtt://`, `mqtts://`, `ws://`, `wss://`), null = app default.
@@ -54,10 +54,10 @@ class JoinLink {
 
   String toUri({String prefix = defaultPrefix}) {
     final q = {
-      'p': projectId,
+      'p': channelId,
       'o': ownerId,
       'b': ?broker,
-      if (topicBase != ProjectTopics.defaultBase) 't': topicBase,
+      if (topicBase != ChannelTopics.defaultBase) 't': topicBase,
     };
     final frag = q.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
     return '$prefix#$frag';

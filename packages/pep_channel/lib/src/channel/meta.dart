@@ -5,21 +5,21 @@ import '../crypto/identity.dart';
 import '../crypto/kdf.dart';
 import '../crypto/pep_crypto.dart';
 import '../errors.dart';
-import 'json.dart';
+import '../codec/json.dart';
 
 /// Plaintext `meta` document: everything needed to derive the project key.
-/// Contains no names or other project information.
+/// Contains no names or other content.
 ///
-/// It is signed by the project owner (verified against the owner key from the
+/// It is signed by the channel owner (verified against the owner key from the
 /// join link), so nobody else can make clients believe the password changed.
 /// Wire format: `signature[64] | json`, signature over
 /// `"pep-meta-v1" | lp16(topic) | json`.
-class ProjectMeta {
-  ProjectMeta({required this.kdf, required this.keyCheck, required this.rev});
+class ChannelMeta {
+  ChannelMeta({required this.kdf, required this.keyCheck, required this.rev});
 
-  factory ProjectMeta.fromJson(Json j) {
+  factory ChannelMeta.fromJson(Json j) {
     j.checkVersion(version);
-    return ProjectMeta(
+    return ChannelMeta(
       kdf: KdfParams.fromJson(j.req<Json>('kdf')),
       keyCheck: unb64u(j.req<String>('check')),
       rev: j.req<int>('rev'),
@@ -27,14 +27,14 @@ class ProjectMeta {
   }
 
   /// Verifies the owner signature and parses.
-  factory ProjectMeta.open(PepCrypto c, {required String topic, required Uint8List data, required Uint8List ownerKey}) {
+  factory ChannelMeta.open(PepCrypto c, {required String topic, required Uint8List data, required Uint8List ownerKey}) {
     final r = ByteReader(data);
     final sig = r.bytes(Identity.signatureBytes);
     final json = r.rest();
     if (!Identity.verify(c, _toSign(topic, json), sig, ownerKey)) {
-      throw const AuthorizationException('meta not signed by the project owner');
+      throw const AuthorizationException('meta not signed by the channel owner');
     }
-    return ProjectMeta.fromJson(decodeJson(json));
+    return ChannelMeta.fromJson(decodeJson(json));
   }
 
   static const version = 1;
