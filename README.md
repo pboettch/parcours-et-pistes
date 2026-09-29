@@ -1,5 +1,7 @@
 # Parcours et Pistes
 
+[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+
 Share search-dog trails — *Recherche Utilitaire* (RU) and *Man Trailing* (MT) — between a
 project creator and participants, with live position sharing. Available (later) for iOS,
 Android and the web. Free and open source under the MIT license.
@@ -18,6 +20,13 @@ Android and the web. Free and open source under the MIT license.
 - Flutter apps (iOS, Android, web): next.
 
 Design and protocol: [`docs/DESIGN.md`](docs/DESIGN.md).
+
+## Continuous integration
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and on pull
+requests: `dart format` check, `dart analyze`, the tests of each package on the Dart VM and in
+Chrome (broker tests against a mosquitto started in the job), and a line-coverage report shown
+in the run summary (uploaded to Codecov when the `CODECOV_TOKEN` secret is set). Locally:
+`.claude/scripts/test.sh` and `.claude/scripts/coverage.sh`.
 
 ## License
 MIT — see [LICENSE](LICENSE).

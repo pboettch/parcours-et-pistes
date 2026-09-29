@@ -33,3 +33,6 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
 - `.claude/scripts/test.sh [-P pkg]... [args]` — `dart test` on VM + Chromium for all/given packages (`-x broker` skips broker tests).
 - `.claude/scripts/e2e.sh` — end-to-end CLI scenario (owner + participant) on the dev broker.
 - `dart run pep_core:pep --help` (in `packages/pep_core`) — CLI for manual testing.
+- `.claude/scripts/coverage.sh` — merged LCOV (`coverage/lcov.info`) + Markdown summary.
+- CI: `.github/workflows/ci.yml` (format, analyze, tests VM + Chrome with mosquitto, coverage).
+  Code must pass `dart format` (page width 120) and `dart analyze --fatal-infos`.
