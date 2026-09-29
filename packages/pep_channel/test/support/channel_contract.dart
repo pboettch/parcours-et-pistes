@@ -157,8 +157,8 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       expect(o.acl.collections, testCollections);
       expect(o.aclRev, 1);
       expect(o.canWrite('doc', 'x'), isTrue);
-      expect(o.canWrite('profile', ownerId.id), isTrue);
-      expect(o.canWrite('profile', aliceId.id), isFalse);
+      expect(o.canWrite('profile', o.selfItemIdOf(ownerId.id)), isTrue);
+      expect(o.canWrite('profile', o.selfItemIdOf(aliceId.id)), isFalse);
       final link = JoinLink.parse(o.joinLink.toUri());
       expect(link.channelId, o.channelId);
       expect(link.ownerId, ownerId.id);
@@ -220,12 +220,12 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       final a = await join(o, aliceId);
       await expectLater(a.put('doc', 'main', b('x')), throwsA(isA<AuthorizationException>()));
       await expectLater(a.put('note', 'n', b('x')), throwsA(isA<AuthorizationException>()));
-      await expectLater(a.put('profile', bobId.id, b('x')), throwsA(isA<AuthorizationException>()));
+      await expectLater(a.put('profile', a.selfItemIdOf(bobId.id), b('x')), throwsA(isA<AuthorizationException>()));
       await expectLater(a.put('photo', 'p', b('x')), throwsA(isA<AuthorizationException>()));
       await expectLater(a.updateAcl(editors: {aliceId.id}), throwsA(isA<AuthorizationException>()));
       await expectLater(a.changePassword('x'), throwsA(isA<AuthorizationException>()));
-      await a.put('profile', aliceId.id, b('Alice'));
-      await eventually(() => s(o.item('profile', aliceId.id)?.body) == 'Alice');
+      await a.put('profile', a.selfItemIdOf(aliceId.id), b('Alice'));
+      await eventually(() => s(o.item('profile', o.selfItemIdOf(aliceId.id))?.body) == 'Alice');
     });
 
     test('forged items and access lists from a password holder are rejected', () async {
@@ -234,7 +234,7 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       final (t, env, key) = await attacker(o, 'pw-1');
       await forge(t, env, key, o.topics.item('doc', 'main'), b('evil'), bobId);
       await forge(t, env, key, o.topics.item('note', 'evil'), b('evil'), bobId);
-      await forge(t, env, key, o.topics.item('profile', aliceId.id), b('fake Alice'), bobId);
+      await forge(t, env, key, o.topics.item('profile', o.selfItemIdOf(aliceId.id)), b('fake Alice'), bobId);
       await forge(t, env, key, o.topics.item('photo', 'p'), b('undeclared'), bobId);
       await forge(t, env, key, o.topics.acl, o.acl.copyWith(editors: {bobId.id}).encode(), bobId, rev: 99);
       await eventually(() => events[a]!.whereType<MessageRejected>().length >= 5, reason: '5 rejections');
@@ -316,35 +316,39 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
     test('ephemeral items: delete clears; close clears only own', () async {
       final o = await create();
       final a = await join(o, aliceId);
-      await a.put('pos', aliceId.id, b('45.2,5.3'));
-      await eventually(() => o.item('pos', aliceId.id) != null);
-      await a.delete('pos', aliceId.id);
-      await eventually(() => o.item('pos', aliceId.id) == null);
+      await a.put('pos', a.selfItemIdOf(aliceId.id), b('45.2,5.3'));
+      await eventually(() => o.item('pos', o.selfItemIdOf(aliceId.id)) != null);
+      await a.delete('pos', a.selfItemIdOf(aliceId.id));
+      await eventually(() => o.item('pos', o.selfItemIdOf(aliceId.id)) == null);
 
-      await a.put('pos', aliceId.id, b('45.3,5.4'));
+      await a.put('pos', a.selfItemIdOf(aliceId.id), b('45.3,5.4'));
       final a2 = await join(o, aliceId); // same identity, e.g. background service
-      await eventually(() => a2.item('pos', aliceId.id) != null && o.item('pos', aliceId.id) != null);
+      await eventually(
+        () => a2.item('pos', a2.selfItemIdOf(aliceId.id)) != null && o.item('pos', o.selfItemIdOf(aliceId.id)) != null,
+      );
       open.remove(a2);
       await a2.close();
       await settle();
-      expect(o.item('pos', aliceId.id), isNotNull, reason: 'a2 did not publish it');
+      expect(o.item('pos', o.selfItemIdOf(aliceId.id)), isNotNull, reason: 'a2 did not publish it');
       open.remove(a);
       await a.close();
-      await eventually(() => o.item('pos', aliceId.id) == null, reason: 'a published it');
+      await eventually(() => o.item('pos', o.selfItemIdOf(aliceId.id)) == null, reason: 'a published it');
     });
 
     test('ephemeral items expire after the collection TTL', () async {
       if (h.clock == null) return markTestSkipped('needs a controllable clock');
       final o = await create();
       final a = await join(o, aliceId);
-      await a.put('pos', aliceId.id, b('p'));
-      await eventually(() => o.item('pos', aliceId.id) != null);
+      await a.put('pos', a.selfItemIdOf(aliceId.id), b('p'));
+      await eventually(() => o.item('pos', o.selfItemIdOf(aliceId.id)) != null);
       h.advance(const Duration(seconds: 61));
       expect(o.items('pos'), isEmpty, reason: 'getter filters expired items');
       o.prune();
       await eventually(() => events[o]!.whereType<ItemRemoved>().any((e) => e.expired));
       final r = h.retained;
-      if (r != null) expect(r.containsKey(o.topics.item('pos', aliceId.id)), isFalse, reason: 'broker expiry');
+      if (r != null) {
+        expect(r.containsKey(o.topics.item('pos', o.selfItemIdOf(aliceId.id))), isFalse, reason: 'broker expiry');
+      }
     });
 
     test('fake meta from a non-owner is ignored', () async {
@@ -374,18 +378,18 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       await a.put('note', 'by-alice', b('A'));
       await o.put('note', 'gone', b('x'));
       await o.delete('note', 'gone');
-      await a.put('profile', aliceId.id, b('Alice'));
-      await o.put('profile', ownerId.id, b('Owner'));
-      await a.put('pos', aliceId.id, b('p'));
-      await eventually(() => o.item('note', 'by-alice') != null && o.item('pos', aliceId.id) != null);
+      await a.put('profile', a.selfItemIdOf(aliceId.id), b('Alice'));
+      await o.put('profile', o.selfItemIdOf(ownerId.id), b('Owner'));
+      await a.put('pos', a.selfItemIdOf(aliceId.id), b('p'));
+      await eventually(() => o.item('note', 'by-alice') != null && o.item('pos', o.selfItemIdOf(aliceId.id)) != null);
 
       await o.changePassword('pw-2', kdf: fastKdf(c));
       await eventually(() => a.locked, reason: 'alice locked');
       expect(events[a]!.whereType<PasswordChanged>(), hasLength(1));
-      expect(() => a.put('profile', aliceId.id, b('x')), throwsStateError);
+      expect(() => a.put('profile', a.selfItemIdOf(aliceId.id), b('x')), throwsStateError);
       await expectLater(a.unlock('pw-1'), throwsA(isA<WrongPasswordException>()));
       await a.unlock('pw-2');
-      expect(a.item('profile', aliceId.id), isNull, reason: 'cleared while alice was locked');
+      expect(a.item('profile', a.selfItemIdOf(aliceId.id)), isNull, reason: 'cleared while alice was locked');
       expect(a.items('pos'), isEmpty);
       await eventually(() => a.item('note', 'by-alice')?.signerId == ownerId.id);
 
@@ -394,8 +398,8 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       expect(s(bob.item('doc', 'main')?.body), 'doc');
       expect(bob.item('note', 'by-alice')!.signerId, ownerId.id, reason: 're-signed by the owner');
       expect(bob.item('note', 'gone'), isNull, reason: 'tombstone kept');
-      expect(s(bob.item('profile', ownerId.id)?.body), 'Owner');
-      expect(bob.item('profile', aliceId.id), isNull, reason: "alice's own item cleared");
+      expect(s(bob.item('profile', bob.selfItemIdOf(ownerId.id))?.body), 'Owner');
+      expect(bob.item('profile', bob.selfItemIdOf(aliceId.id)), isNull, reason: "alice's own item cleared");
       expect(bob.items('pos'), isEmpty);
       expect(bob.acl.editors, {aliceId.id});
       await expectLater(join(o, bobId, password: 'pw-1'), throwsA(isA<WrongPasswordException>()));
@@ -418,8 +422,8 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       final o = await create();
       await o.put('note', 'n', b('x'));
       final a = await join(o, aliceId);
-      await a.put('profile', aliceId.id, b('A'));
-      await eventually(() => o.item('profile', aliceId.id) != null);
+      await a.put('profile', a.selfItemIdOf(aliceId.id), b('A'));
+      await eventually(() => o.item('profile', o.selfItemIdOf(aliceId.id)) != null);
       open.remove(o);
       await o.deleteChannel();
       await eventually(() => events[a]!.whereType<ChannelDeleted>().isNotEmpty);
@@ -437,13 +441,175 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       await (await join(o, aliceId)).sync();
     });
 
+    // ------------------------------------------------ pseudonyms, devices
+
+    test('self items use per-channel pseudonyms, never member ids', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      expect(a.selfItemId(), isNot(aliceId.id));
+      expect(a.selfItemId(), o.selfItemIdOf(aliceId.id), reason: 'same pseudonym for every member');
+      await expectLater(a.put('profile', aliceId.id, b('x')), throwsA(isA<AuthorizationException>()));
+      final o2 = await create(); // another channel: another pseudonym
+      expect(o2.selfItemIdOf(aliceId.id), isNot(o.selfItemIdOf(aliceId.id)));
+    });
+
+    test('several devices of one identity keep separate self items', () async {
+      final o = await create();
+      final phone = await join(o, aliceId);
+      final tablet = await join(o, aliceId);
+      await phone.put('pos', phone.selfItemId(device: 'phone'), b('p'));
+      await tablet.put('pos', tablet.selfItemId(device: 'tablet'), b('t'));
+      await eventually(() => o.items('pos').length == 2);
+      expect(o.items('pos').values.map((i) => i.signerId), everyElement(aliceId.id));
+      expect(() => phone.selfItemId(device: 'bad/device'), throwsA(isA<FormatPepException>()));
+      await expectLater(
+        phone.put('pos', '${phone.selfItemIdOf(bobId.id)}.phone', b('x')),
+        throwsA(isA<AuthorizationException>()),
+      );
+    });
+
+    // ------------------------------------------------ ownership transfer
+
+    test('ownership transfer: offer, accept, former owner becomes editor', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      final oldLink = o.joinLink;
+      await o.put('doc', 'main', b('by owner'));
+      await o.put('note', 'n', b('note by owner'));
+      await expectLater(a.acceptOwnership(), throwsA(isA<AuthorizationException>()));
+
+      await o.offerOwnership(aliceId.id);
+      await eventually(() => a.ownershipOfferedToMe);
+      await a.acceptOwnership();
+      expect(a.isOwner, isTrue);
+      await eventually(() => o.ownerId == aliceId.id);
+      expect(o.isOwner, isFalse);
+      expect(o.acl.editors, contains(ownerId.id));
+      expect(o.acl.owners.map((l) => l.memberId), [ownerId.id, aliceId.id]);
+      expect(a.item('doc', 'main')!.signerId, aliceId.id, reason: 'owner items re-signed');
+      await eventually(() => o.item('doc', 'main')?.signerId == aliceId.id);
+
+      // The new owner has the powers, the former one no longer.
+      await a.put('doc', 'main', b('by new owner'));
+      await a.addEditor(bobId.id);
+      await expectLater(o.updateAcl(editors: {}), throwsA(isA<AuthorizationException>()));
+      await expectLater(o.put('doc', 'main', b('x')), throwsA(isA<AuthorizationException>()));
+      await o.put('note', 'n2', b('former owner is an editor'));
+
+      // Old links (pinning the former owner) and new links both work.
+      final viaOld = await join(o, bobId, link: JoinLink.parse(oldLink.toUri()));
+      expect(viaOld.ownerId, aliceId.id);
+      expect(s(viaOld.item('doc', 'main')?.body), 'by new owner');
+      expect(viaOld.item('note', 'n')?.signerId, ownerId.id, reason: 'former owner stays a valid editor');
+      expect(a.joinLink.ownerId, aliceId.id);
+      final viaNew = await join(a, Identity.generate(c));
+      expect(viaNew.acl.owners, hasLength(2));
+      await eventually(() => a.item('note', 'n2') != null);
+    });
+
+    test('ownership offer: only the designated member, cancellable', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      final bob = await join(o, bobId);
+      await o.offerOwnership(bobId.id);
+      await eventually(() => bob.ownershipOfferedToMe);
+      expect(a.ownershipOfferedToMe, isFalse);
+      await expectLater(a.acceptOwnership(), throwsA(isA<AuthorizationException>()));
+      await o.cancelOwnershipOffer();
+      await eventually(() => !bob.ownershipOfferedToMe);
+      await expectLater(bob.acceptOwnership(), throwsA(isA<AuthorizationException>()));
+      expect(o.isOwner, isTrue);
+    });
+
+    test('forged ownership chains and a former owner rolling back are rejected', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      final (t, env, key) = await attacker(o, 'pw-1');
+      // Bob appends himself to the chain without the owner's signature.
+      final fakeLink = OwnerLink(bobId.id, bobId.sign(OwnerLink.toSign(o.channelId, 1, bobId.id)));
+      final forged = o.acl.copyWith(owners: [...o.acl.owners, fakeLink]);
+      await forge(t, env, key, o.topics.acl, forged.encode(), bobId, rev: 50);
+      await eventually(() => events[a]!.whereType<MessageRejected>().isNotEmpty);
+      expect(a.ownerId, ownerId.id);
+
+      // Legit transfer to alice, then the former owner tries to take it back.
+      await o.offerOwnership(aliceId.id);
+      await eventually(() => a.ownershipOfferedToMe);
+      await a.acceptOwnership();
+      await eventually(() => o.ownerId == aliceId.id);
+      final before = events[a]!.whereType<MessageRejected>().length;
+      final rollback = ChannelAcl.initial(ownerId: ownerId.id, collections: testCollections);
+      await forge(t, env, key, o.topics.acl, rollback.encode(), ownerId, rev: 99);
+      await t.publish(
+        o.topics.meta,
+        ChannelMeta(kdf: fastKdf(c), keyCheck: key.check, rev: 99).seal(topic: o.topics.meta, owner: ownerId),
+        retain: true,
+      );
+      await eventually(() => events[a]!.whereType<MessageRejected>().length >= before + 2);
+      expect(a.ownerId, aliceId.id);
+      expect(a.locked, isFalse, reason: 'meta from the former owner does not count');
+      await t.disconnect();
+    });
+
+    // ------------------------------------------------ restricted items
+
+    test('restricted items are readable by their recipients only', () async {
+      final o = await create();
+      await o.addEditor(aliceId.id);
+      final a = await join(o, aliceId);
+      final bob = await join(o, bobId);
+      final carol = Identity.generate(c);
+      final cc = await join(o, carol);
+
+      final it = await a.put('note', 'secret', b('only for bob'), recipients: {bobId.id});
+      expect(it.recipients, {bobId.id, ownerId.id, aliceId.id}, reason: 'owner and publisher added');
+      await eventually(() => bob.item('note', 'secret') != null && o.item('note', 'secret') != null);
+      expect(s(bob.item('note', 'secret')!.body), 'only for bob');
+      await settle();
+      expect(cc.item('note', 'secret'), isNull);
+      expect(events[cc]!.whereType<MessageRejected>(), isEmpty, reason: 'hidden, not rejected');
+
+      // Narrowing the recipients removes the item from bob's view.
+      await a.put('note', 'secret', b('now only for carol'), recipients: {carol.id});
+      await eventually(() => bob.item('note', 'secret') == null && cc.item('note', 'secret') != null);
+      expect(events[bob]!.whereType<ItemRemoved>().map((e) => e.id), contains('secret'));
+      // Opening it up again makes it public.
+      await a.put('note', 'secret', b('public'));
+      await eventually(() => bob.item('note', 'secret')?.recipients == null);
+    });
+
+    test('restricted items survive password change and ownership transfer', () async {
+      final o = await create();
+      await o.addEditor(aliceId.id);
+      final a = await join(o, aliceId);
+      final bob = await join(o, bobId);
+      await a.put('note', 'r', b('for alice and owner'), recipients: {});
+      await o.put('doc', 'd', b('owner doc for alice'), recipients: {aliceId.id});
+      await eventually(() => bob.items('note').isEmpty && a.item('doc', 'd') != null);
+
+      await o.changePassword('pw-2', kdf: fastKdf(c));
+      await eventually(() => a.locked);
+      await a.unlock('pw-2');
+      await eventually(() => a.item('note', 'r')?.rev == 2 && a.item('doc', 'd')?.rev == 2);
+      expect(s(a.item('note', 'r')!.body), 'for alice and owner');
+
+      // Bob becomes owner: he re-signs the owner doc without being able to read it.
+      await bob.unlock('pw-2');
+      await o.offerOwnership(bobId.id);
+      await eventually(() => bob.ownershipOfferedToMe);
+      await bob.acceptOwnership();
+      expect(bob.item('doc', 'd'), isNull, reason: 'not a recipient');
+      await eventually(() => a.item('doc', 'd')?.signerId == bobId.id);
+      expect(s(a.item('doc', 'd')!.body), 'owner doc for alice');
+    });
+
     test('nothing but meta is readable on the broker', () async {
       final log = h.log;
       if (log == null) return markTestSkipped('broker log not observable');
       final o = await create();
       await o.put('note', 'n', b('Secret forest trail'));
       final a = await join(o, aliceId);
-      await a.put('profile', aliceId.id, b('Alice Martin'));
+      await a.put('profile', a.selfItemIdOf(aliceId.id), b('Alice Martin'));
       await settle();
       for (final (topic, payload) in log) {
         if (payload.isEmpty || !topic.contains(o.channelId)) continue;
@@ -452,6 +618,9 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
           expect(text.contains(secret), isFalse, reason: '"$secret" leaked on $topic');
         }
         if (!topic.endsWith('/meta')) expect(text.startsWith('PEP1'), isTrue, reason: topic);
+        for (final id in [ownerId.id, aliceId.id]) {
+          expect(topic.contains(id), isFalse, reason: 'member id in topic $topic');
+        }
       }
     });
   });

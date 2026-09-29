@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as hash;
 import 'package:sodium/sodium_sumo.dart';
 
 import '../codec/bytes.dart';
@@ -57,7 +58,55 @@ class Identity {
     }
   }
 
+  /// Human-comparable fingerprint of this identity (see [fingerprintOf]).
+  String get fingerprint => fingerprintOf(id);
+
+  /// Encrypts [message] so that only [recipientId] can read it (libsodium
+  /// sealed box to the X25519 form of the recipient's Ed25519 key).
+  static Uint8List sealFor(PepCrypto c, String recipientId, Uint8List message) => c.sodium.crypto.box.seal(
+    message: message,
+    publicKey: c.sodium.crypto.sign.pkToCurve25519(publicKeyFromId(recipientId)),
+  );
+
+  /// Opens a [sealFor] message addressed to this identity; null if it is not
+  /// for us or was tampered with.
+  Uint8List? openSealed(Uint8List sealed) {
+    final sign = _c.sodium.crypto.sign;
+    final sk = sign.skToCurve25519(_keyPair.secretKey);
+    try {
+      return _c.sodium.crypto.box.sealOpen(
+        cipherText: sealed,
+        publicKey: sign.pkToCurve25519(publicKey),
+        secretKey: sk,
+      );
+    } catch (_) {
+      return null;
+    } finally {
+      sk.dispose();
+    }
+  }
+
   void dispose() => _keyPair.secretKey.dispose();
+}
+
+/// Short fingerprint of a member id for people to compare (e.g. when adding a
+/// friend): 80 bits of SHA-256 of the public key, as 4 groups of 4 Crockford
+/// base32 characters, e.g. `7K2M-9QXD-4HNR-T0VC`.
+String fingerprintOf(String memberId) {
+  final digest = hash.sha256.convert(publicKeyFromId(memberId)).bytes;
+  const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  var bits = 0, value = 0;
+  final out = StringBuffer();
+  for (final b in digest.take(10)) {
+    value = (value << 8 | b) & 0xffff;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      out.write(alphabet[(value >> bits) & 31]);
+    }
+  }
+  final s = out.toString();
+  return [for (var i = 0; i < 16; i += 4) s.substring(i, i + 4)].join('-');
 }
 
 /// Parses a member id back into a public key.

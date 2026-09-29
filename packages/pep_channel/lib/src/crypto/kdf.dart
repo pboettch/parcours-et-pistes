@@ -50,7 +50,7 @@ class KdfParams {
 
 /// Keys derived from a project password. Call [dispose] when no longer needed.
 class ProjectKey {
-  ProjectKey._(this.dataKey, this.check);
+  ProjectKey._(this.dataKey, this.check, this.pseudonymKey);
 
   /// Derives the project keys from [password]. CPU/memory intensive: run it off
   /// the UI thread in apps.
@@ -66,21 +66,13 @@ class ProjectKey {
       alg: CryptoPwhashAlgorithm.argon2id13,
     );
     try {
-      final data = s.crypto.kdf.deriveFromKey(
-        masterKey: master,
-        context: _context,
-        subkeyId: BigInt.one,
-        subkeyLen: 32,
-      );
-      final checkKey = s.crypto.kdf.deriveFromKey(
-        masterKey: master,
-        context: _context,
-        subkeyId: BigInt.two,
-        subkeyLen: 32,
-      );
+      SecureKey sub(int id) =>
+          s.crypto.kdf.deriveFromKey(masterKey: master, context: _context, subkeyId: BigInt.from(id), subkeyLen: 32);
+      final data = sub(1);
+      final checkKey = sub(2);
       final check = s.crypto.genericHash(message: utf8Bytes('pep-key-check'), key: checkKey, outLen: 16);
       checkKey.dispose();
-      return ProjectKey._(data, check);
+      return ProjectKey._(data, check, sub(3));
     } finally {
       master.dispose();
     }
@@ -95,5 +87,12 @@ class ProjectKey {
   /// immediately (it gives an attacker nothing beyond what any ciphertext gives).
   final Uint8List check;
 
-  void dispose() => dataKey.dispose();
+  /// Key for per-project member pseudonyms (topic ids of `self` items), so
+  /// that member ids never appear in topic names.
+  final SecureKey pseudonymKey;
+
+  void dispose() {
+    dataKey.dispose();
+    pseudonymKey.dispose();
+  }
 }

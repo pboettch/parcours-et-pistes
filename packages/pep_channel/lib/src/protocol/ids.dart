@@ -3,7 +3,7 @@ import '../crypto/pep_crypto.dart';
 import '../errors.dart';
 
 final _uuidRe = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
-final _levelRe = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+final _levelRe = RegExp(r'^[A-Za-z0-9_.-]{1,64}$');
 
 /// Random UUID v4 from libsodium's CSPRNG. Channel ids are secrets: they are the
 /// only thing protecting a channel's (encrypted) topics from being found.
@@ -21,7 +21,8 @@ String newItemId(PepCrypto c) => b64u(c.randomBytes(12));
 
 bool isChannelId(String s) => _uuidRe.hasMatch(s);
 
-/// Item ids (and member ids): safe as a single MQTT topic level.
+/// Item ids (and member ids): safe as a single MQTT topic level. `.` separates
+/// a member pseudonym from a device suffix in `self` items.
 bool isTopicId(String s) => _levelRe.hasMatch(s);
 
 String checkChannelId(String s) => isChannelId(s) ? s : throw FormatPepException('invalid channel id "$s"');

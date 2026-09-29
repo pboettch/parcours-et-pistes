@@ -15,7 +15,7 @@ void main() {
     other = Identity.generate(c).id;
   });
 
-  ChannelAcl acl() => ChannelAcl(
+  ChannelAcl acl() => ChannelAcl.initial(
     ownerId: owner,
     editors: {editor},
     collections: {
@@ -48,14 +48,19 @@ void main() {
       ('pos', owner, other): false,
       ('undeclared', owner, 'x'): false,
     };
-    cases.forEach((k, v) => expect(a.canWrite(k.$2, k.$1, k.$3), v, reason: '$k'));
+    cases.forEach((k, v) => expect(a.canWrite(k.$2, k.$1, k.$3, isSelfItem: (m, i) => m == i), v, reason: '$k'));
   });
 
   test('rejects invalid access lists', () {
     Map<String, dynamic> j() => jsonDecode(jsonEncode(acl().toJson())) as Map<String, dynamic>;
     final bad = <Map<String, dynamic>>[
       j()..['v'] = 2,
-      j()..['owner'] = 'short',
+      j()
+        ..['owners'] = [
+          {'id': 'short'},
+        ],
+      j()..['owners'] = [],
+      j()..remove('owners'),
       j()..['editors'] = ['short'],
       j()
         ..['collections'] = {
