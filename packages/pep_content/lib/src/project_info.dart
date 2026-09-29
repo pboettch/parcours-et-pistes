@@ -10,8 +10,10 @@ enum Discipline {
   /// Man Trailing: track only.
   mt;
 
-  static Discipline parse(String s) => Discipline.values.firstWhere((d) => d.name == s,
-      orElse: () => throw ContentFormatException('unknown discipline "$s"'));
+  static Discipline parse(String s) => Discipline.values.firstWhere(
+    (d) => d.name == s,
+    orElse: () => throw ContentFormatException('unknown discipline "$s"'),
+  );
 }
 
 /// Descriptive project information (`info` collection, written by the owner).
@@ -41,18 +43,19 @@ class ProjectInfo {
   final Json extra;
 
   ProjectInfo copyWith({String? name, String? description, Json? extra}) => ProjectInfo(
-      name: name ?? this.name,
-      description: description ?? this.description,
-      discipline: discipline,
-      extra: extra ?? this.extra);
+    name: name ?? this.name,
+    description: description ?? this.description,
+    discipline: discipline,
+    extra: extra ?? this.extra,
+  );
 
   Json toJson() => {
-        'v': version,
-        'name': name,
-        if (description != null) 'desc': description,
-        'disc': discipline.name,
-        if (extra.isNotEmpty) 'extra': extra,
-      };
+    'v': version,
+    'name': name,
+    if (description != null) 'desc': description,
+    'disc': discipline.name,
+    if (extra.isNotEmpty) 'extra': extra,
+  };
 
   Uint8List encode() => encodeJson(toJson());
 }

@@ -9,8 +9,6 @@ import 'package:test/test.dart';
 import 'support/broker.dart';
 import 'support/session_contract.dart';
 
-
-
 class _BrokerHarness implements SessionHarness {
   _BrokerHarness(this.url);
 
@@ -33,6 +31,8 @@ class _BrokerHarness implements SessionHarness {
 }
 
 void main() {
-  sessionContract('mqtt5 ${isWeb ? 'websocket' : 'tcp'}',
-      () => _BrokerHarness(Uri.parse(isWeb ? brokerWs : brokerTcp)));
+  sessionContract(
+    'mqtt5 ${isWeb ? 'websocket' : 'tcp'}',
+    () => _BrokerHarness(Uri.parse(isWeb ? brokerWs : brokerTcp)),
+  );
 }

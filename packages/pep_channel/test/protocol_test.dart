@@ -70,10 +70,11 @@ void main() {
 
     test('round trip with broker and base, custom web prefix', () {
       final l = JoinLink(
-          channelId: newUuid(c),
-          ownerId: Identity.generate(c).id,
-          broker: 'wss://mqtt.example.org:8443/mqtt',
-          topicBase: 'club/pep');
+        channelId: newUuid(c),
+        ownerId: Identity.generate(c).id,
+        broker: 'wss://mqtt.example.org:8443/mqtt',
+        topicBase: 'club/pep',
+      );
       final s = l.toUri(prefix: 'https://example.org/join');
       expect(Uri.parse(s).query, isEmpty, reason: 'nothing outside the fragment');
       final p = JoinLink.parse(s);

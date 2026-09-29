@@ -81,8 +81,8 @@ class MemoryTransport implements Transport {
   }
 
   void _deliver(TransportMessage m) => scheduleMicrotask(() {
-        if (_state == TransportState.connected) _messages.add(m);
-      });
+    if (_state == TransportState.connected) _messages.add(m);
+  });
 
   @override
   Future<void> connect() async {

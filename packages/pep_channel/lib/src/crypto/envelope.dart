@@ -77,15 +77,20 @@ class Envelope {
     }
     final header = _header(flags, rev, time.millisecondsSinceEpoch);
     final sig = signer.sign(_toSign(topic, header, payload));
-    final plain = (ByteWriter()
-          ..bytes(header)
-          ..bytes(signer.publicKey)
-          ..bytes(sig)
-          ..bytes(payload))
-        .take();
+    final plain =
+        (ByteWriter()
+              ..bytes(header)
+              ..bytes(signer.publicKey)
+              ..bytes(sig)
+              ..bytes(payload))
+            .take();
     final nonce = _c.randomBytes(_nonceBytes);
-    final ct = _c.sodium.crypto.aeadXChaCha20Poly1305IETF
-        .encrypt(message: plain, nonce: nonce, key: key, additionalData: utf8Bytes(topic));
+    final ct = _c.sodium.crypto.aeadXChaCha20Poly1305IETF.encrypt(
+      message: plain,
+      nonce: nonce,
+      key: key,
+      additionalData: utf8Bytes(topic),
+    );
     return (ByteWriter()
           ..bytes(_magic)
           ..u8(version)
@@ -105,8 +110,12 @@ class Envelope {
     final ct = r.rest();
     final Uint8List plain;
     try {
-      plain = _c.sodium.crypto.aeadXChaCha20Poly1305IETF
-          .decrypt(cipherText: ct, nonce: nonce, key: key, additionalData: utf8Bytes(topic));
+      plain = _c.sodium.crypto.aeadXChaCha20Poly1305IETF.decrypt(
+        cipherText: ct,
+        nonce: nonce,
+        key: key,
+        additionalData: utf8Bytes(topic),
+      );
     } catch (_) {
       throw const DecryptionException('cannot decrypt (wrong key, topic or tampered data)');
     }
@@ -147,10 +156,11 @@ class Envelope {
         .take();
   }
 
-  static Uint8List _toSign(String topic, Uint8List header, Uint8List payload) => (ByteWriter()
-        ..bytes(utf8Bytes('pep-sig-v1'))
-        ..lp16(utf8Bytes(topic))
-        ..bytes(header)
-        ..bytes(payload))
-      .take();
+  static Uint8List _toSign(String topic, Uint8List header, Uint8List payload) =>
+      (ByteWriter()
+            ..bytes(utf8Bytes('pep-sig-v1'))
+            ..lp16(utf8Bytes(topic))
+            ..bytes(header)
+            ..bytes(payload))
+          .take();
 }

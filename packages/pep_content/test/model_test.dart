@@ -8,7 +8,11 @@ T roundTrip<T>(T Function(Json) from, Json j) => from(jsonDecode(jsonEncode(j)) 
 void main() {
   group('ProjectInfo', () {
     final info = ProjectInfo(
-        name: 'Piste de la forêt', description: 'Samedi', discipline: Discipline.ru, extra: {'future': 1});
+      name: 'Piste de la forêt',
+      description: 'Samedi',
+      discipline: Discipline.ru,
+      extra: {'future': 1},
+    );
 
     test('round trip keeps unknown fields', () {
       final d = ProjectInfo.decode(info.encode());
@@ -37,7 +41,14 @@ void main() {
   group('Position', () {
     test('round trip', () {
       final p = Position(
-          lat: 45.18, lon: 5.72, time: DateTime.utc(2026, 9, 29), altitude: 212, accuracy: 4.5, heading: 90, speed: 1.2);
+        lat: 45.18,
+        lon: 5.72,
+        time: DateTime.utc(2026, 9, 29),
+        altitude: 212,
+        accuracy: 4.5,
+        heading: 90,
+        speed: 1.2,
+      );
       expect(Position.decode(p.encode()).toJson(), p.toJson());
       expect(Position.decode(Position(lat: 0, lon: 0, time: DateTime.utc(2026)).encode()).accuracy, isNull);
     });
@@ -45,8 +56,10 @@ void main() {
     test('rejects invalid coordinates', () {
       expect(() => Position(lat: 91, lon: 0, time: DateTime.now()), throwsA(isA<ContentFormatException>()));
       expect(() => Position(lat: double.nan, lon: 0, time: DateTime.now()), throwsA(isA<ContentFormatException>()));
-      expect(() => roundTrip(Position.fromJson, {'v': 1, 'lat': 'x', 'lon': 0, 'ts': 0}),
-          throwsA(isA<ContentFormatException>()));
+      expect(
+        () => roundTrip(Position.fromJson, {'v': 1, 'lat': 'x', 'lon': 0, 'ts': 0}),
+        throwsA(isA<ContentFormatException>()),
+      );
     });
   });
 }

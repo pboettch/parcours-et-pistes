@@ -7,14 +7,19 @@ import 'package:pep_core/pep_core.dart';
 final gpxString = Gpx(
   name: 'Piste 1',
   waypoints: [
-    GpxWaypoint.object(45.2001, 5.3002, name: 'Objet 1', extensions: [
-      pepElement('note', text: 'gant en cuir'),
-    ]),
+    GpxWaypoint.object(
+      45.2001,
+      5.3002,
+      name: 'Objet 1',
+      extensions: [pepElement('note', text: 'gant en cuir')],
+    ),
   ],
   tracks: [
-    GpxTrack(segments: [
-      [GpxPoint(45.2000, 5.3000), GpxPoint(45.2005, 5.3005)]
-    ]),
+    GpxTrack(
+      segments: [
+        [GpxPoint(45.2000, 5.3000), GpxPoint(45.2005, 5.3005)],
+      ],
+    ),
   ],
 ).toXml();
 
@@ -25,8 +30,12 @@ Future<void> main() async {
   // Owner
   final owner = Identity.generate(crypto);
   final project = await ProjectSession.create(
-    crypto: crypto, transport: MemoryTransport(broker), identity: owner,
-    name: 'Forêt de Chambaran', discipline: Discipline.ru, password: 'secret',
+    crypto: crypto,
+    transport: MemoryTransport(broker),
+    identity: owner,
+    name: 'Forêt de Chambaran',
+    discipline: Discipline.ru,
+    password: 'secret',
   );
   await project.publishTrack(gpx: gpxString);
   final link = project.joinLink.toUri();
@@ -35,8 +44,11 @@ Future<void> main() async {
   // Participant
   final me = Identity.generate(crypto);
   final session = await ProjectSession.join(
-    crypto: crypto, transport: MemoryTransport(broker), identity: me,
-    link: JoinLink.parse(link), password: 'secret',
+    crypto: crypto,
+    transport: MemoryTransport(broker),
+    identity: me,
+    link: JoinLink.parse(link),
+    password: 'secret',
   );
   project.events.listen((e) {
     if (e case PositionUpdated(:final memberId, :final position)) {
@@ -45,8 +57,10 @@ Future<void> main() async {
   });
   final track = session.tracks.values.first;
   final object = track.document.objects.single;
-  print('participant sees track "${track.name}", object "${object.name}" '
-      '(note: ${object.extensions.pep('note')?.innerText})');
+  print(
+    'participant sees track "${track.name}", object "${object.name}" '
+    '(note: ${object.extensions.pep('note')?.innerText})',
+  );
   await session.publishPosition(Position(lat: 45.2, lon: 5.3, time: DateTime.now()));
   await Future<void>.delayed(const Duration(milliseconds: 50));
 

@@ -31,5 +31,8 @@ class _BrokerHarness implements ChannelHarness {
 }
 
 void main() {
-  channelContract('mqtt5 ${isWeb ? 'websocket' : 'tcp'}', () => _BrokerHarness(Uri.parse(isWeb ? brokerWs : brokerTcp)));
+  channelContract(
+    'mqtt5 ${isWeb ? 'websocket' : 'tcp'}',
+    () => _BrokerHarness(Uri.parse(isWeb ? brokerWs : brokerTcp)),
+  );
 }

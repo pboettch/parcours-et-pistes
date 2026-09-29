@@ -9,12 +9,8 @@ import 'topics.dart';
 /// Everything lives in the URL fragment, which browsers never send to servers:
 /// `<prefix>#p=<uuid>&o=<owner id>[&b=<broker url>][&t=<topic base>]`
 class JoinLink {
-  JoinLink({
-    required String channelId,
-    required this.ownerId,
-    this.broker,
-    this.topicBase = ChannelTopics.defaultBase,
-  }) : channelId = checkChannelId(channelId) {
+  JoinLink({required String channelId, required this.ownerId, this.broker, this.topicBase = ChannelTopics.defaultBase})
+    : channelId = checkChannelId(channelId) {
     publicKeyFromId(ownerId); // validates
     ChannelTopics(channelId, base: topicBase); // validates base
     if (broker != null) _checkBroker(broker!);
@@ -53,12 +49,7 @@ class JoinLink {
   final String topicBase;
 
   String toUri({String prefix = defaultPrefix}) {
-    final q = {
-      'p': channelId,
-      'o': ownerId,
-      'b': ?broker,
-      if (topicBase != ChannelTopics.defaultBase) 't': topicBase,
-    };
+    final q = {'p': channelId, 'o': ownerId, 'b': ?broker, if (topicBase != ChannelTopics.defaultBase) 't': topicBase};
     final frag = q.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
     return '$prefix#$frag';
   }

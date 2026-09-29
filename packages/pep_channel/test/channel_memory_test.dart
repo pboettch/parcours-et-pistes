@@ -12,7 +12,8 @@ class _MemoryHarness implements ChannelHarness {
   Transport transport() => MemoryTransport(broker);
 
   @override
-  DateTime Function()? get clock => () => _now;
+  DateTime Function()? get clock =>
+      () => _now;
 
   @override
   void advance(Duration d) => _now = _now.add(d);

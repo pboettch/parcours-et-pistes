@@ -41,9 +41,7 @@ extension JsonGet on Json {
 
   List<String> strList(String k) {
     final v = opt<List<dynamic>>(k) ?? const [];
-    return [
-      for (final e in v) e is String ? e : throw ContentFormatException('field "$k" must hold strings')
-    ];
+    return [for (final e in v) e is String ? e : throw ContentFormatException('field "$k" must hold strings')];
   }
 
   /// Format version check: accepts [supported] and rejects anything newer.

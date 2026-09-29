@@ -46,14 +46,12 @@ class Identity {
     }
   }
 
-  Uint8List sign(Uint8List message) =>
-      _c.sodium.crypto.sign.detached(message: message, secretKey: _keyPair.secretKey);
+  Uint8List sign(Uint8List message) => _c.sodium.crypto.sign.detached(message: message, secretKey: _keyPair.secretKey);
 
   static bool verify(PepCrypto c, Uint8List message, Uint8List signature, Uint8List publicKey) {
     if (signature.length != signatureBytes || publicKey.length != publicKeyBytes) return false;
     try {
-      return c.sodium.crypto.sign
-          .verifyDetached(message: message, signature: signature, publicKey: publicKey);
+      return c.sodium.crypto.sign.verifyDetached(message: message, signature: signature, publicKey: publicKey);
     } catch (_) {
       return false;
     }

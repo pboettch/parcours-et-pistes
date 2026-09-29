@@ -22,14 +22,22 @@ void main() {
 
     test('rejects hostile params', () {
       final salt = b64u(Uint8List(16));
-      expect(() => KdfParams.fromJson({'alg': 'argon2id13', 'ops': 3, 'mem': 1 << 40, 'salt': salt}),
-          throwsA(isA<FormatPepException>()));
-      expect(() => KdfParams.fromJson({'alg': 'argon2id13', 'ops': 99, 'mem': 1 << 26, 'salt': salt}),
-          throwsA(isA<FormatPepException>()));
-      expect(() => KdfParams.fromJson({'alg': 'scrypt', 'ops': 3, 'mem': 1 << 26, 'salt': salt}),
-          throwsA(isA<FormatPepException>()));
-      expect(() => KdfParams.fromJson({'alg': 'argon2id13', 'ops': 3, 'mem': 1 << 26, 'salt': 'AA'}),
-          throwsA(isA<FormatPepException>()));
+      expect(
+        () => KdfParams.fromJson({'alg': 'argon2id13', 'ops': 3, 'mem': 1 << 40, 'salt': salt}),
+        throwsA(isA<FormatPepException>()),
+      );
+      expect(
+        () => KdfParams.fromJson({'alg': 'argon2id13', 'ops': 99, 'mem': 1 << 26, 'salt': salt}),
+        throwsA(isA<FormatPepException>()),
+      );
+      expect(
+        () => KdfParams.fromJson({'alg': 'scrypt', 'ops': 3, 'mem': 1 << 26, 'salt': salt}),
+        throwsA(isA<FormatPepException>()),
+      );
+      expect(
+        () => KdfParams.fromJson({'alg': 'argon2id13', 'ops': 3, 'mem': 1 << 26, 'salt': 'AA'}),
+        throwsA(isA<FormatPepException>()),
+      );
     });
   });
 
@@ -103,22 +111,42 @@ void main() {
     test('signed header: revision, time, tombstone', () {
       final big = DateTime.utc(2100, 1, 1, 0, 0, 0, 999);
       final sealed = env.seal(
-          key: key.dataKey, topic: topic, body: Uint8List(0), signer: me, rev: 0xfffffffe, time: big, deleted: true);
+        key: key.dataKey,
+        topic: topic,
+        body: Uint8List(0),
+        signer: me,
+        rev: 0xfffffffe,
+        time: big,
+        deleted: true,
+      );
       final o = env.open(key: key.dataKey, topic: topic, data: sealed);
       expect(o.rev, 0xfffffffe);
       expect(o.time, big);
       expect(o.deleted, isTrue);
       expect(o.body, isEmpty);
-      final live = env.open(key: key.dataKey, topic: topic, data: env.seal(key: key.dataKey, topic: topic, body: big0, signer: me, rev: 7, time: t0));
+      final live = env.open(
+        key: key.dataKey,
+        topic: topic,
+        data: env.seal(key: key.dataKey, topic: topic, body: big0, signer: me, rev: 7, time: t0),
+      );
       expect(live.rev, 7);
       expect(live.time, t0);
       expect(live.deleted, isFalse);
-      expect(() => env.seal(key: key.dataKey, topic: topic, body: big0, signer: me, rev: -1, time: t0), throwsArgumentError);
-      expect(() => env.seal(key: key.dataKey, topic: topic, body: big0, signer: me, rev: 0x100000000, time: t0), throwsArgumentError);
+      expect(
+        () => env.seal(key: key.dataKey, topic: topic, body: big0, signer: me, rev: -1, time: t0),
+        throwsArgumentError,
+      );
+      expect(
+        () => env.seal(key: key.dataKey, topic: topic, body: big0, signer: me, rev: 0x100000000, time: t0),
+        throwsArgumentError,
+      );
     });
 
     test('small and empty bodies', () {
-      for (final body in [Uint8List(0), Uint8List.fromList([42])]) {
+      for (final body in [
+        Uint8List(0),
+        Uint8List.fromList([42]),
+      ]) {
         final sealed = env.seal(key: key.dataKey, topic: topic, body: body, signer: me, rev: 1, time: t0);
         expect(env.open(key: key.dataKey, topic: topic, data: sealed).body, body);
       }
@@ -135,30 +163,40 @@ void main() {
     test('wrong key fails', () {
       final other = ProjectKey.derive(c, 'other', fastKdf(c));
       final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me, rev: 1, time: t0);
-      expect(() => env.open(key: other.dataKey, topic: topic, data: sealed),
-          throwsA(isA<DecryptionException>()));
+      expect(() => env.open(key: other.dataKey, topic: topic, data: sealed), throwsA(isA<DecryptionException>()));
     });
 
     test('wrong topic fails (no replay onto another topic)', () {
       final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me, rev: 1, time: t0);
-      expect(() => env.open(key: key.dataKey, topic: 'pep/v1/abc/track/t2', data: sealed),
-          throwsA(isA<DecryptionException>()));
+      expect(
+        () => env.open(key: key.dataKey, topic: 'pep/v1/abc/track/t2', data: sealed),
+        throwsA(isA<DecryptionException>()),
+      );
     });
 
     test('every flipped byte is detected', () {
-      final sealed = env.seal(key: key.dataKey, topic: topic, body: utf8Bytes('hello world'), signer: me, rev: 1, time: t0);
+      final sealed = env.seal(
+        key: key.dataKey,
+        topic: topic,
+        body: utf8Bytes('hello world'),
+        signer: me,
+        rev: 1,
+        time: t0,
+      );
       for (var i = 0; i < sealed.length; i++) {
         final t = Uint8List.fromList(sealed)..[i] ^= 0x01;
-        expect(() => env.open(key: key.dataKey, topic: topic, data: t),
-            throwsA(isA<PepException>()), reason: 'byte $i');
+        expect(
+          () => env.open(key: key.dataKey, topic: topic, data: t),
+          throwsA(isA<PepException>()),
+          reason: 'byte $i',
+        );
       }
     });
 
     test('truncated / garbage input', () {
       final sealed = env.seal(key: key.dataKey, topic: topic, body: big, signer: me, rev: 1, time: t0);
       for (final bad in [Uint8List(0), Uint8List.sublistView(sealed, 0, 10), utf8Bytes('hello')]) {
-        expect(() => env.open(key: key.dataKey, topic: topic, data: bad),
-            throwsA(isA<PepException>()));
+        expect(() => env.open(key: key.dataKey, topic: topic, data: bad), throwsA(isA<PepException>()));
       }
     });
   });
@@ -172,8 +210,7 @@ void main() {
 
     test('rejects a length prefix smaller than the real content', () {
       final z = deflate(Uint8List(100000));
-      final lying = Uint8List.fromList(z)
-        ..setRange(0, 4, [0, 0, 0x03, 0xe8]); // claims 1000 bytes
+      final lying = Uint8List.fromList(z)..setRange(0, 4, [0, 0, 0x03, 0xe8]); // claims 1000 bytes
       expect(() => inflate(lying), throwsA(isA<FormatPepException>()));
     });
 

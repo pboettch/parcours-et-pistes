@@ -19,8 +19,10 @@ void main() {
   group('Mqtt5Transport errors', () {
     Future<void> expectConnectFails(BrokerConfig cfg, [Matcher? message]) async {
       final t = Mqtt5Transport(cfg);
-      await expectLater(t.connect(),
-          throwsA(isA<TransportException>().having((e) => e.message, 'message', message ?? anything)));
+      await expectLater(
+        t.connect(),
+        throwsA(isA<TransportException>().having((e) => e.message, 'message', message ?? anything)),
+      );
       expect(t.state, TransportState.disconnected);
     }
 

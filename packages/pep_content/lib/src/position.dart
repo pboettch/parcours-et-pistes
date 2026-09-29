@@ -56,15 +56,15 @@ class Position {
   final double? speed;
 
   Json toJson() => {
-        'v': version,
-        'lat': lat,
-        'lon': lon,
-        'ts': time.millisecondsSinceEpoch,
-        if (altitude != null) 'alt': altitude,
-        if (accuracy != null) 'acc': accuracy,
-        if (heading != null) 'hdg': heading,
-        if (speed != null) 'spd': speed,
-      };
+    'v': version,
+    'lat': lat,
+    'lon': lon,
+    'ts': time.millisecondsSinceEpoch,
+    if (altitude != null) 'alt': altitude,
+    if (accuracy != null) 'acc': accuracy,
+    if (heading != null) 'hdg': heading,
+    if (speed != null) 'spd': speed,
+  };
 
   Uint8List encode() => encodeJson(toJson());
 }

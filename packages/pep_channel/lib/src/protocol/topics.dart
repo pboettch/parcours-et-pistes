@@ -33,8 +33,7 @@ const reservedTopicNames = {'meta', 'acl', 'sync'};
 
 bool isCollectionName(String s) => _collectionRe.hasMatch(s) && !reservedTopicNames.contains(s);
 
-String checkCollection(String s) =>
-    isCollectionName(s) ? s : throw FormatPepException('invalid collection name "$s"');
+String checkCollection(String s) => isCollectionName(s) ? s : throw FormatPepException('invalid collection name "$s"');
 
 /// Topic layout of one channel:
 ///
@@ -74,8 +73,7 @@ class ChannelTopics {
       ['meta'] => const TopicRef(TopicKind.meta),
       ['acl'] => const TopicRef(TopicKind.acl),
       ['sync', final n] when isTopicId(n) => TopicRef(TopicKind.sync, id: n),
-      [final c, final id] when isCollectionName(c) && isTopicId(id) =>
-        TopicRef(TopicKind.item, collection: c, id: id),
+      [final c, final id] when isCollectionName(c) && isTopicId(id) => TopicRef(TopicKind.item, collection: c, id: id),
       _ => null,
     };
   }

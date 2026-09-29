@@ -23,8 +23,10 @@ class CollectionPolicy {
 
   factory CollectionPolicy.fromJson(Json j) {
     final w = j.req<String>('w');
-    final writers = Writers.values.firstWhere((x) => x.name == w,
-        orElse: () => throw FormatPepException('unknown writer policy "$w"'));
+    final writers = Writers.values.firstWhere(
+      (x) => x.name == w,
+      orElse: () => throw FormatPepException('unknown writer policy "$w"'),
+    );
     final ttl = j.opt<int>('ttl');
     if (ttl != null && (ttl < minTtl.inSeconds || ttl > maxTtl.inSeconds)) {
       throw FormatPepException('ttl $ttl out of range');
@@ -103,17 +105,17 @@ class ChannelAcl {
   }
 
   ChannelAcl copyWith({Set<String>? editors, Map<String, CollectionPolicy>? collections}) => ChannelAcl(
-        ownerId: ownerId,
-        editors: Set.unmodifiable(editors ?? this.editors),
-        collections: Map.unmodifiable(collections ?? this.collections),
-      );
+    ownerId: ownerId,
+    editors: Set.unmodifiable(editors ?? this.editors),
+    collections: Map.unmodifiable(collections ?? this.collections),
+  );
 
   Json toJson() => {
-        'v': version,
-        'owner': ownerId,
-        'editors': editors.toList()..sort(),
-        'collections': {for (final e in collections.entries) e.key: e.value.toJson()},
-      };
+    'v': version,
+    'owner': ownerId,
+    'editors': editors.toList()..sort(),
+    'collections': {for (final e in collections.entries) e.key: e.value.toJson()},
+  };
 
   Uint8List encode() => encodeJson(toJson());
 }

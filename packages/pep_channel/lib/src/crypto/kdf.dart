@@ -8,11 +8,7 @@ import 'pep_crypto.dart';
 
 /// Password-hashing parameters, stored in plaintext in the project's `meta` topic.
 class KdfParams {
-  KdfParams({
-    required this.opsLimit,
-    required this.memLimit,
-    required this.salt,
-  }) {
+  KdfParams({required this.opsLimit, required this.memLimit, required this.salt}) {
     if (opsLimit < minOps || opsLimit > maxOps) {
       throw FormatPepException('kdf opsLimit $opsLimit out of range');
     }
@@ -24,17 +20,12 @@ class KdfParams {
     }
   }
 
-  factory KdfParams.generate(PepCrypto c,
-          {int opsLimit = defaultOps, int memLimit = defaultMem}) =>
+  factory KdfParams.generate(PepCrypto c, {int opsLimit = defaultOps, int memLimit = defaultMem}) =>
       KdfParams(opsLimit: opsLimit, memLimit: memLimit, salt: c.randomBytes(saltBytes));
 
   factory KdfParams.fromJson(Map<String, dynamic> j) {
     if (j['alg'] != alg) throw FormatPepException('unsupported kdf ${j['alg']}');
-    return KdfParams(
-      opsLimit: _int(j['ops']),
-      memLimit: _int(j['mem']),
-      salt: unb64u(j['salt'] as String? ?? ''),
-    );
+    return KdfParams(opsLimit: _int(j['ops']), memLimit: _int(j['mem']), salt: unb64u(j['salt'] as String? ?? ''));
   }
 
   static const alg = 'argon2id13';
@@ -52,11 +43,9 @@ class KdfParams {
   final int memLimit;
   final Uint8List salt;
 
-  Map<String, dynamic> toJson() =>
-      {'alg': alg, 'ops': opsLimit, 'mem': memLimit, 'salt': b64u(salt)};
+  Map<String, dynamic> toJson() => {'alg': alg, 'ops': opsLimit, 'mem': memLimit, 'salt': b64u(salt)};
 
-  static int _int(Object? v) =>
-      v is int ? v : throw const FormatPepException('kdf param is not an integer');
+  static int _int(Object? v) => v is int ? v : throw const FormatPepException('kdf param is not an integer');
 }
 
 /// Keys derived from a project password. Call [dispose] when no longer needed.
@@ -78,11 +67,18 @@ class ProjectKey {
     );
     try {
       final data = s.crypto.kdf.deriveFromKey(
-          masterKey: master, context: _context, subkeyId: BigInt.one, subkeyLen: 32);
+        masterKey: master,
+        context: _context,
+        subkeyId: BigInt.one,
+        subkeyLen: 32,
+      );
       final checkKey = s.crypto.kdf.deriveFromKey(
-          masterKey: master, context: _context, subkeyId: BigInt.two, subkeyLen: 32);
-      final check = s.crypto.genericHash(
-          message: utf8Bytes('pep-key-check'), key: checkKey, outLen: 16);
+        masterKey: master,
+        context: _context,
+        subkeyId: BigInt.two,
+        subkeyLen: 32,
+      );
+      final check = s.crypto.genericHash(message: utf8Bytes('pep-key-check'), key: checkKey, outLen: 16);
       checkKey.dispose();
       return ProjectKey._(data, check);
     } finally {

@@ -24,8 +24,10 @@ class Inbox {
   final _changed = StreamController<void>.broadcast();
   late final StreamSubscription<TransportMessage> _sub;
 
-  Future<List<TransportMessage>> waitFor(bool Function(List<TransportMessage>) cond,
-      {Duration timeout = const Duration(seconds: 5)}) async {
+  Future<List<TransportMessage>> waitFor(
+    bool Function(List<TransportMessage>) cond, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
     final deadline = DateTime.now().add(timeout);
     while (!cond(messages)) {
       final left = deadline.difference(DateTime.now());
@@ -104,8 +106,7 @@ void transportContract(String name, TransportHarness Function() harness, {String
       final inbox = Inbox(b);
       await b.subscribe('$base/#');
       final got = await inbox.waitFor((m) => m.length >= 2);
-      expect({for (final m in got) m.topic: String.fromCharCodes(m.payload)},
-          {'$base/r': 'v2', '$base/other': 'o'});
+      expect({for (final m in got) m.topic: String.fromCharCodes(m.payload)}, {'$base/r': 'v2', '$base/other': 'o'});
       expect(got.every((m) => m.retained), isTrue);
 
       await a.publish('$base/r', Uint8List(0), retain: true);

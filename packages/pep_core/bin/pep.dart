@@ -29,23 +29,25 @@ Future<void> main(List<String> argv) async {
   parser
     ..addCommand('id', _common())
     ..addCommand(
-        'create',
-        _common()
-          ..addOption('name', mandatory: true)
-          ..addOption('discipline', allowed: ['ru', 'mt'], defaultsTo: 'ru')
-          ..addOption('description')
-          ..addOption('ttl', help: 'Position TTL in seconds', defaultsTo: '1800')
-          ..addMultiOption('gpx', help: 'GPX file(s) to publish')
-          ..addOption('link-broker', help: 'Broker URL to embed in the link'))
+      'create',
+      _common()
+        ..addOption('name', mandatory: true)
+        ..addOption('discipline', allowed: ['ru', 'mt'], defaultsTo: 'ru')
+        ..addOption('description')
+        ..addOption('ttl', help: 'Position TTL in seconds', defaultsTo: '1800')
+        ..addMultiOption('gpx', help: 'GPX file(s) to publish')
+        ..addOption('link-broker', help: 'Broker URL to embed in the link'),
+    )
     ..addCommand('watch', _common())
     ..addCommand('info', _common())
     ..addCommand(
-        'push',
-        _common()
-          ..addOption('gpx', mandatory: true)
-          ..addOption('id', help: 'Update this track id')
-          ..addOption('name', help: 'Set the GPX metadata name')
-          ..addOption('description', help: 'Set the GPX metadata description'))
+      'push',
+      _common()
+        ..addOption('gpx', mandatory: true)
+        ..addOption('id', help: 'Update this track id')
+        ..addOption('name', help: 'Set the GPX metadata name')
+        ..addOption('description', help: 'Set the GPX metadata description'),
+    )
     ..addCommand('rm', _common())
     ..addCommand('export', _common()..addOption('out', defaultsTo: '.'))
     ..addCommand('pos', _common()..addOption('acc'))
@@ -145,12 +147,14 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
       }
     case 'pos':
       if (extra.length < 2) throw const FormatPepException('usage: pep pos <link> <lat> <lon>');
-      await s.publishPosition(Position(
-        lat: double.parse(extra[0]),
-        lon: double.parse(extra[1]),
-        time: DateTime.now().toUtc(),
-        accuracy: cmd.option('acc') == null ? null : double.parse(cmd.option('acc')!),
-      ));
+      await s.publishPosition(
+        Position(
+          lat: double.parse(extra[0]),
+          lon: double.parse(extra[1]),
+          time: DateTime.now().toUtc(),
+          accuracy: cmd.option('acc') == null ? null : double.parse(cmd.option('acc')!),
+        ),
+      );
       await s.close(clearPosition: false);
       return;
     case 'name':
@@ -181,8 +185,10 @@ Future<void> _watch(ProjectSession s) async {
       case ProjectUpdated(:final project):
         print('$t project rev ${project.rev}: ${project.name}, editors ${project.editors.length}');
       case TrackUpdated(:final track):
-        print('$t track ${track.id} rev ${track.rev} "${track.name ?? ''}" by ${_who(s, track.signerId)}'
-            ' (${_gpxSummary(track.gpx)})');
+        print(
+          '$t track ${track.id} rev ${track.rev} "${track.name ?? ''}" by ${_who(s, track.signerId)}'
+          ' (${_gpxSummary(track.gpx)})',
+        );
       case TrackRemoved(:final trackId):
         print('$t track $trackId removed');
       case MemberUpdated(:final memberId, :final profile):
@@ -190,8 +196,10 @@ Future<void> _watch(ProjectSession s) async {
       case MemberRemoved(:final memberId):
         print('$t member ${_short(memberId)} removed');
       case PositionUpdated(:final memberId, :final position):
-        print('$t position ${_who(s, memberId)}: ${position.lat}, ${position.lon}'
-            '${position.accuracy == null ? '' : ' ±${position.accuracy}m'}');
+        print(
+          '$t position ${_who(s, memberId)}: ${position.lat}, ${position.lon}'
+          '${position.accuracy == null ? '' : ' ±${position.accuracy}m'}',
+        );
       case PositionRemoved(:final memberId):
         print('$t position ${_who(s, memberId)} gone');
       case PasswordChanged():
@@ -239,11 +247,13 @@ String _who(ProjectSession s, String id) {
   return name == null ? _short(id) : '$name (${_short(id)})';
 }
 
-Transport _transport(_Opt opt, JoinLink? link) => Mqtt5Transport(BrokerConfig(
-      Uri.parse(opt('broker') ?? link?.broker ?? _defaultBroker),
-      username: opt('user'),
-      password: opt('broker-password'),
-    ));
+Transport _transport(_Opt opt, JoinLink? link) => Mqtt5Transport(
+  BrokerConfig(
+    Uri.parse(opt('broker') ?? link?.broker ?? _defaultBroker),
+    username: opt('user'),
+    password: opt('broker-password'),
+  ),
+);
 
 String _password(_Opt opt) {
   final p = opt('password') ?? Platform.environment['PEP_PASSWORD'];

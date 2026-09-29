@@ -44,12 +44,19 @@ void main() {
       time: DateTime.utc(2026, 1, 2),
       waypoints: [GpxWaypoint.object(45.0, 5.0, name: 'Gant')],
       tracks: [
-        GpxTrack(name: 'Trail', segments: [
-          [GpxPoint(45.0, 5.0, ele: 300, time: DateTime.utc(2026, 1, 2, 10)), GpxPoint(45.001, 5.001)]
-        ]),
-        GpxTrack(name: 'R', isRoute: true, segments: [
-          [GpxPoint(1, 2), GpxPoint(3, 4)]
-        ]),
+        GpxTrack(
+          name: 'Trail',
+          segments: [
+            [GpxPoint(45.0, 5.0, ele: 300, time: DateTime.utc(2026, 1, 2, 10)), GpxPoint(45.001, 5.001)],
+          ],
+        ),
+        GpxTrack(
+          name: 'R',
+          isRoute: true,
+          segments: [
+            [GpxPoint(1, 2), GpxPoint(3, 4)],
+          ],
+        ),
       ],
     );
     final xml = g.toXml();
@@ -136,9 +143,22 @@ void extensionTests() {
     test('built with pepElement', () {
       final g = Gpx(
         name: 'MT',
-        metadataExtensions: [pepElement('trail', attributes: {'kind': 'mt'}, children: [pepElement('note', text: 'x')])],
+        metadataExtensions: [
+          pepElement(
+            'trail',
+            attributes: {'kind': 'mt'},
+            children: [pepElement('note', text: 'x')],
+          ),
+        ],
         waypoints: [
-          GpxWaypoint.object(1, 2, name: 'O', extensions: [pepElement('object', attributes: {'index': '1'})])
+          GpxWaypoint.object(
+            1,
+            2,
+            name: 'O',
+            extensions: [
+              pepElement('object', attributes: {'index': '1'}),
+            ],
+          ),
         ],
       );
       final h = Gpx.parse(g.toXml());

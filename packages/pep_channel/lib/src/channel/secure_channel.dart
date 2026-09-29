@@ -48,13 +48,13 @@ class SecureChannel {
     required this.linkBroker,
     required DateTime Function()? clock,
     required Duration pruneInterval,
-  })  : _c = crypto,
-        _env = Envelope(crypto),
-        _transport = transport,
-        _me = identity,
-        _ownerKey = publicKeyFromId(ownerId),
-        _clock = clock ?? DateTime.now,
-        _pruneInterval = pruneInterval;
+  }) : _c = crypto,
+       _env = Envelope(crypto),
+       _transport = transport,
+       _me = identity,
+       _ownerKey = publicKeyFromId(ownerId),
+       _clock = clock ?? DateTime.now,
+       _pruneInterval = pruneInterval;
 
   /// Creates a new channel owned by [identity] with the given [collections].
   static Future<SecureChannel> create({
@@ -119,12 +119,16 @@ class SecureChannel {
     try {
       await s._start();
       await s.sync(timeout: timeout);
-      await s._metaArrived.future.timeout(timeout,
-          onTimeout: () => throw const ChannelNotFoundException('no channel metadata on the broker'));
+      await s._metaArrived.future.timeout(
+        timeout,
+        onTimeout: () => throw const ChannelNotFoundException('no channel metadata on the broker'),
+      );
       await s.unlock(password);
       if (s._acl == null) {
-        await s._aclArrived.future.timeout(timeout,
-            onTimeout: () => throw const ChannelNotFoundException('no valid access list on the broker'));
+        await s._aclArrived.future.timeout(
+          timeout,
+          onTimeout: () => throw const ChannelNotFoundException('no valid access list on the broker'),
+        );
       }
       return s;
     } catch (_) {
@@ -194,8 +198,7 @@ class SecureChannel {
   /// Revision of the current access list.
   int get aclRev => _aclVersion?.$1 ?? 0;
 
-  JoinLink get joinLink =>
-      JoinLink(channelId: channelId, ownerId: ownerId, broker: linkBroker, topicBase: topics.base);
+  JoinLink get joinLink => JoinLink(channelId: channelId, ownerId: ownerId, broker: linkBroker, topicBase: topics.base);
 
   /// A new random item id (16 chars, topic-safe).
   String generateItemId() => newItemId(_c);
@@ -327,7 +330,11 @@ class SecureChannel {
   /// broker (metadata last), then closes the session.
   Future<void> deleteChannel() async {
     _requireOwner();
-    int order(String t) => switch (topics.parse(t)?.kind) { TopicKind.meta => 0, TopicKind.acl => 1, _ => 2 };
+    int order(String t) => switch (topics.parse(t)?.kind) {
+      TopicKind.meta => 0,
+      TopicKind.acl => 1,
+      _ => 2,
+    };
     final all = _raw.keys.toList()..sort((a, b) => order(b).compareTo(order(a)));
     for (final t in all) {
       await _transport.publish(t, Uint8List(0), retain: true);
@@ -341,7 +348,7 @@ class SecureChannel {
     final now = _now();
     final stale = [
       for (final MapEntry(key: t, value: e) in _entries.entries)
-        if (e.item case final i? when !_fresh(i, now)) (t, i)
+        if (e.item case final i? when !_fresh(i, now)) (t, i),
     ];
     for (final (t, i) in stale) {
       _entries[t] = _Entry(_entries[t]!.rev, _entries[t]!.time, null);
@@ -452,7 +459,11 @@ class SecureChannel {
   }
 
   void _reprocessAll() {
-    int order(TopicRef r) => switch (r.kind) { TopicKind.meta => 0, TopicKind.acl => 1, _ => 2 };
+    int order(TopicRef r) => switch (r.kind) {
+      TopicKind.meta => 0,
+      TopicKind.acl => 1,
+      _ => 2,
+    };
     final all = [for (final e in _raw.entries) (topics.parse(e.key)!, e.key, e.value)]
       ..sort((a, b) => order(a.$1).compareTo(order(b.$1)));
     for (final (ref, topic, payload) in all) {
@@ -549,7 +560,13 @@ class SecureChannel {
       return;
     }
     final item = ChannelItem(
-        collection: collection, id: id, rev: o.rev, time: o.time, signerId: o.signerId, body: o.body);
+      collection: collection,
+      id: id,
+      rev: o.rev,
+      time: o.time,
+      signerId: o.signerId,
+      body: o.body,
+    );
     if (!_fresh(item, _now())) {
       _entries[topic] = _Entry(o.rev, o.time, null);
       if (hadItem) _emit(ItemRemoved(collection, id, expired: true));

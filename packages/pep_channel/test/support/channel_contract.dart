@@ -23,8 +23,7 @@ abstract class ChannelHarness {
   List<(String, Uint8List)>? get log;
 }
 
-Future<void> eventually(bool Function() cond,
-    {Duration timeout = const Duration(seconds: 5), String? reason}) async {
+Future<void> eventually(bool Function() cond, {Duration timeout = const Duration(seconds: 5), String? reason}) async {
   final deadline = DateTime.now().add(timeout);
   while (!cond()) {
     if (DateTime.now().isAfter(deadline)) fail('timed out waiting for ${reason ?? 'condition'}');
@@ -84,29 +83,37 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       return ch;
     }
 
-    Future<SecureChannel> create({String password = 'pw-1'}) async => track(await SecureChannel.create(
-          crypto: c,
-          transport: h.transport(),
-          identity: ownerId,
-          password: password,
-          collections: testCollections,
-          kdf: fastKdf(c),
-          clock: h.clock,
-          pruneInterval: const Duration(hours: 1),
-        ));
+    Future<SecureChannel> create({String password = 'pw-1'}) async => track(
+      await SecureChannel.create(
+        crypto: c,
+        transport: h.transport(),
+        identity: ownerId,
+        password: password,
+        collections: testCollections,
+        kdf: fastKdf(c),
+        clock: h.clock,
+        pruneInterval: const Duration(hours: 1),
+      ),
+    );
 
-    Future<SecureChannel> join(SecureChannel owner, Identity who,
-            {String password = 'pw-1', JoinLink? link, Duration timeout = const Duration(seconds: 5)}) async =>
-        track(await SecureChannel.join(
-          crypto: c,
-          transport: h.transport(),
-          identity: who,
-          link: link ?? JoinLink.parse(owner.joinLink.toUri()),
-          password: password,
-          timeout: timeout,
-          clock: h.clock,
-          pruneInterval: const Duration(hours: 1),
-        ));
+    Future<SecureChannel> join(
+      SecureChannel owner,
+      Identity who, {
+      String password = 'pw-1',
+      JoinLink? link,
+      Duration timeout = const Duration(seconds: 5),
+    }) async => track(
+      await SecureChannel.join(
+        crypto: c,
+        transport: h.transport(),
+        identity: who,
+        link: link ?? JoinLink.parse(owner.joinLink.toUri()),
+        password: password,
+        timeout: timeout,
+        clock: h.clock,
+        pruneInterval: const Duration(hours: 1),
+      ),
+    );
 
     DateTime now() => (h.clock ?? DateTime.now)().toUtc();
 
@@ -119,17 +126,30 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
         if (m.topic == owner.topics.meta && !got.isCompleted) got.complete(m.payload);
       });
       await t.subscribe(owner.topics.meta);
-      final meta = ChannelMeta.open(c,
-          topic: owner.topics.meta, data: await got.future, ownerKey: publicKeyFromId(owner.ownerId));
+      final meta = ChannelMeta.open(
+        c,
+        topic: owner.topics.meta,
+        data: await got.future,
+        ownerKey: publicKeyFromId(owner.ownerId),
+      );
       await sub.cancel();
       await t.unsubscribe(owner.topics.meta);
       return (t, Envelope(c), ProjectKey.derive(c, password, meta.kdf));
     }
 
-    Future<void> forge(Transport t, Envelope env, ProjectKey key, String topic, Uint8List body, Identity as,
-            {int rev = 1}) =>
-        t.publish(topic, env.seal(key: key.dataKey, topic: topic, body: body, signer: as, rev: rev, time: now()),
-            retain: true);
+    Future<void> forge(
+      Transport t,
+      Envelope env,
+      ProjectKey key,
+      String topic,
+      Uint8List body,
+      Identity as, {
+      int rev = 1,
+    }) => t.publish(
+      topic,
+      env.seal(key: key.dataKey, topic: topic, body: body, signer: as, rev: rev, time: now()),
+      retain: true,
+    );
 
     test('create: access list and join link', () async {
       final o = await create();
@@ -176,13 +196,23 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       final o = await create();
       await expectLater(join(o, aliceId, password: 'nope'), throwsA(isA<WrongPasswordException>()));
       await expectLater(
-          join(o, aliceId,
-              link: JoinLink(channelId: newUuid(c), ownerId: ownerId.id), timeout: const Duration(milliseconds: 500)),
-          throwsA(isA<ChannelNotFoundException>()));
+        join(
+          o,
+          aliceId,
+          link: JoinLink(channelId: newUuid(c), ownerId: ownerId.id),
+          timeout: const Duration(milliseconds: 500),
+        ),
+        throwsA(isA<ChannelNotFoundException>()),
+      );
       await expectLater(
-          join(o, aliceId,
-              link: JoinLink(channelId: o.channelId, ownerId: bobId.id), timeout: const Duration(milliseconds: 500)),
-          throwsA(isA<ChannelNotFoundException>()));
+        join(
+          o,
+          aliceId,
+          link: JoinLink(channelId: o.channelId, ownerId: bobId.id),
+          timeout: const Duration(milliseconds: 500),
+        ),
+        throwsA(isA<ChannelNotFoundException>()),
+      );
     });
 
     test('writer policies are enforced locally', () async {
@@ -323,10 +353,14 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       final (t, _, _) = await attacker(o, 'pw-1');
       final kdf = fastKdf(c);
       await t.publish(
-          o.topics.meta,
-          ChannelMeta(kdf: kdf, keyCheck: ProjectKey.derive(c, 'hijack', kdf).check, rev: 99)
-              .seal(topic: o.topics.meta, owner: bobId),
-          retain: true);
+        o.topics.meta,
+        ChannelMeta(
+          kdf: kdf,
+          keyCheck: ProjectKey.derive(c, 'hijack', kdf).check,
+          rev: 99,
+        ).seal(topic: o.topics.meta, owner: bobId),
+        retain: true,
+      );
       await eventually(() => events[a]!.whereType<MessageRejected>().isNotEmpty);
       expect(a.locked, isFalse);
       await t.disconnect();
@@ -389,8 +423,10 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       open.remove(o);
       await o.deleteChannel();
       await eventually(() => events[a]!.whereType<ChannelDeleted>().isNotEmpty);
-      await expectLater(join(o, bobId, timeout: const Duration(milliseconds: 500)),
-          throwsA(isA<ChannelNotFoundException>()));
+      await expectLater(
+        join(o, bobId, timeout: const Duration(milliseconds: 500)),
+        throwsA(isA<ChannelNotFoundException>()),
+      );
       final r = h.retained;
       if (r != null) expect(r.keys.where((k) => k.contains(o.channelId)), isEmpty);
     });

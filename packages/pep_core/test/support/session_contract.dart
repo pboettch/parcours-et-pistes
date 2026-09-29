@@ -14,8 +14,7 @@ abstract class SessionHarness {
   List<(String, Uint8List)>? get log;
 }
 
-Future<void> eventually(bool Function() cond,
-    {Duration timeout = const Duration(seconds: 5), String? reason}) async {
+Future<void> eventually(bool Function() cond, {Duration timeout = const Duration(seconds: 5), String? reason}) async {
   final deadline = DateTime.now().add(timeout);
   while (!cond()) {
     if (DateTime.now().isAfter(deadline)) fail('timed out waiting for ${reason ?? 'condition'}');
@@ -84,32 +83,40 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
     }
 
     Future<ProjectSession> create({String password = 'pw-1', Duration ttl = const Duration(minutes: 10)}) async =>
-        track(await ProjectSession.create(
-          crypto: c,
-          transport: h.transport(),
-          identity: ownerId,
-          name: 'Forêt de Chambaran',
-          description: 'Entraînement du samedi',
-          discipline: Discipline.ru,
-          password: password,
-          positionTtl: ttl,
-          kdf: fastKdf(c),
-          clock: h.clock,
-          pruneInterval: const Duration(hours: 1),
-        ));
+        track(
+          await ProjectSession.create(
+            crypto: c,
+            transport: h.transport(),
+            identity: ownerId,
+            name: 'Forêt de Chambaran',
+            description: 'Entraînement du samedi',
+            discipline: Discipline.ru,
+            password: password,
+            positionTtl: ttl,
+            kdf: fastKdf(c),
+            clock: h.clock,
+            pruneInterval: const Duration(hours: 1),
+          ),
+        );
 
-    Future<ProjectSession> join(ProjectSession owner, Identity who,
-            {String password = 'pw-1', JoinLink? link, Duration timeout = const Duration(seconds: 5)}) async =>
-        track(await ProjectSession.join(
-          crypto: c,
-          transport: h.transport(),
-          identity: who,
-          link: link ?? JoinLink.parse(owner.joinLink.toUri()),
-          password: password,
-          timeout: timeout,
-          clock: h.clock,
-          pruneInterval: const Duration(hours: 1),
-        ));
+    Future<ProjectSession> join(
+      ProjectSession owner,
+      Identity who, {
+      String password = 'pw-1',
+      JoinLink? link,
+      Duration timeout = const Duration(seconds: 5),
+    }) async => track(
+      await ProjectSession.join(
+        crypto: c,
+        transport: h.transport(),
+        identity: who,
+        link: link ?? JoinLink.parse(owner.joinLink.toUri()),
+        password: password,
+        timeout: timeout,
+        clock: h.clock,
+        pruneInterval: const Duration(hours: 1),
+      ),
+    );
 
     DateTime now() => (h.clock ?? DateTime.now)().toUtc();
 
@@ -269,9 +276,14 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final o = await create();
       await expectLater(join(o, aliceId, password: 'nope'), throwsA(isA<WrongPasswordException>()));
       await expectLater(
-          join(o, aliceId,
-              link: JoinLink(channelId: newUuid(c), ownerId: ownerId.id), timeout: const Duration(milliseconds: 500)),
-          throwsA(isA<ProjectNotFoundException>()));
+        join(
+          o,
+          aliceId,
+          link: JoinLink(channelId: newUuid(c), ownerId: ownerId.id),
+          timeout: const Duration(milliseconds: 500),
+        ),
+        throwsA(isA<ProjectNotFoundException>()),
+      );
     });
 
     test('deleteProject notifies participants', () async {
@@ -281,8 +293,10 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       sessions.remove(o);
       await o.deleteProject();
       await eventually(() => events[a]!.whereType<ProjectDeleted>().isNotEmpty);
-      await expectLater(join(o, bobId, timeout: const Duration(milliseconds: 500)),
-          throwsA(isA<ProjectNotFoundException>()));
+      await expectLater(
+        join(o, bobId, timeout: const Duration(milliseconds: 500)),
+        throwsA(isA<ProjectNotFoundException>()),
+      );
     });
 
     test('content types unknown to this version are ignored', () async {
@@ -290,7 +304,8 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final a = await join(o, aliceId);
       // A newer app version adds a "photo" collection to the project.
       await o.channel.updateAcl(
-          collections: {...o.channel.acl.collections, 'photo': const CollectionPolicy(Writers.editors)});
+        collections: {...o.channel.acl.collections, 'photo': const CollectionPolicy(Writers.editors)},
+      );
       await o.channel.put('photo', 'p1', utf8Bytes('jpeg…'));
       await eventually(() => a.channel.items('photo').containsKey('p1'), reason: 'channel carries it');
       await settle();

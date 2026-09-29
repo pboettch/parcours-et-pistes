@@ -55,9 +55,10 @@ class ChannelMeta {
         .take();
   }
 
-  static Uint8List _toSign(String topic, Uint8List json) => (ByteWriter()
-        ..bytes(utf8Bytes('pep-meta-v1'))
-        ..lp16(utf8Bytes(topic))
-        ..bytes(json))
-      .take();
+  static Uint8List _toSign(String topic, Uint8List json) =>
+      (ByteWriter()
+            ..bytes(utf8Bytes('pep-meta-v1'))
+            ..lp16(utf8Bytes(topic))
+            ..bytes(json))
+          .take();
 }

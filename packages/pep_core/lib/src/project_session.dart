@@ -51,8 +51,11 @@ class ProjectSession {
       clock: clock,
       pruneInterval: pruneInterval,
     );
-    await channel.put(PepCollections.info, PepCollections.infoId,
-        ProjectInfo(name: name, description: description, discipline: discipline).encode());
+    await channel.put(
+      PepCollections.info,
+      PepCollections.infoId,
+      ProjectInfo(name: name, description: description, discipline: discipline).encode(),
+    );
     return ProjectSession._(channel);
   }
 
@@ -203,9 +206,8 @@ class ProjectSession {
     if (!_events.isClosed) _events.add(e);
   }
 
-  Map<String, T> _all<T>(String collection, T? Function(ChannelItem) decode) => Map.unmodifiable({
-        for (final i in channel.items(collection).values) i.id: ?decode(i),
-      });
+  Map<String, T> _all<T>(String collection, T? Function(ChannelItem) decode) =>
+      Map.unmodifiable({for (final i in channel.items(collection).values) i.id: ?decode(i)});
 
   /// Decodes [i] once per revision; invalid content yields null.
   T? _decode<T>(ChannelItem i, T Function(Uint8List) decode) {
@@ -225,10 +227,10 @@ class ProjectSession {
   }
 
   Track? _track(ChannelItem i) => _decode(i, (b) {
-        final t = Track(i);
-        t.document; // validate the GPX
-        return t;
-      });
+    final t = Track(i);
+    t.document; // validate the GPX
+    return t;
+  });
 
   void _onChannelEvent(ch.ChannelEvent e) {
     switch (e) {

@@ -16,15 +16,19 @@ MqttClient createMqttClient(Uri url, String clientId, {Set<String> pinnedCertifi
       c.secure = url.scheme == 'mqtts';
     case 'ws':
     case 'wss':
-      c = MqttServerClient.withPort('${url.scheme}://${url.host}${url.path}', clientId,
-          url.hasPort ? url.port : (url.scheme == 'wss' ? 443 : 80));
+      c = MqttServerClient.withPort(
+        '${url.scheme}://${url.host}${url.path}',
+        clientId,
+        url.hasPort ? url.port : (url.scheme == 'wss' ? 443 : 80),
+      );
       c.useWebSocket = true;
     default:
       throw TransportException('unsupported broker scheme ${url.scheme}');
   }
   if (pinnedCertificates.isNotEmpty) {
     final pins = {for (final p in pinnedCertificates) p.toLowerCase().replaceAll(':', '')};
-    c.onBadCertificate = (dynamic cert) => cert is X509Certificate && pins.contains(sha256.convert(cert.der).toString());
+    c.onBadCertificate = (dynamic cert) =>
+        cert is X509Certificate && pins.contains(sha256.convert(cert.der).toString());
   }
   return c;
 }

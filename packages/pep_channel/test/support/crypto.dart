@@ -6,5 +6,4 @@ PepCrypto? _crypto;
 Future<PepCrypto> testCrypto() async => _crypto ??= await PepCrypto.init();
 
 /// Cheap KDF params so tests stay fast.
-KdfParams fastKdf(PepCrypto c) =>
-    KdfParams.generate(c, opsLimit: KdfParams.minOps, memLimit: KdfParams.minMem);
+KdfParams fastKdf(PepCrypto c) => KdfParams.generate(c, opsLimit: KdfParams.minOps, memLimit: KdfParams.minMem);

@@ -11,13 +11,16 @@ const pepPrefix = 'pep';
 
 /// Creates an element of a custom section in the [pepNamespace], e.g.
 /// `pepElement('object', attributes: {'index': '1'})` → `<pep:object index="1"/>`.
-XmlElement pepElement(String localName,
-        {Map<String, String> attributes = const {}, String? text, List<XmlNode> children = const []}) =>
-    XmlElement(
-      XmlName.parts(localName, prefix: pepPrefix, namespaceUri: pepNamespace),
-      [for (final a in attributes.entries) XmlAttribute(XmlName.qualified(a.key), a.value)],
-      [if (text != null) XmlText(text), ...children],
-    );
+XmlElement pepElement(
+  String localName, {
+  Map<String, String> attributes = const {},
+  String? text,
+  List<XmlNode> children = const [],
+}) => XmlElement(
+  XmlName.parts(localName, prefix: pepPrefix, namespaceUri: pepNamespace),
+  [for (final a in attributes.entries) XmlAttribute(XmlName.qualified(a.key), a.value)],
+  [if (text != null) XmlText(text), ...children],
+);
 
 /// Access to the custom sections among a list of `<extensions>` children.
 extension GpxExtensionAccess on List<XmlElement> {
@@ -48,23 +51,31 @@ class GpxPoint {
 /// A GPX waypoint. Objects placed along an RU track are waypoints of type
 /// [objectType]; their additional information goes into [extensions].
 class GpxWaypoint extends GpxPoint {
-  GpxWaypoint(super.lat, super.lon,
-      {super.ele,
-      super.time,
-      super.extensions,
-      this.name,
-      this.comment,
-      this.description,
-      this.type,
-      this.symbol});
+  GpxWaypoint(
+    super.lat,
+    super.lon, {
+    super.ele,
+    super.time,
+    super.extensions,
+    this.name,
+    this.comment,
+    this.description,
+    this.type,
+    this.symbol,
+  });
 
   /// `<type>` value marking an RU object.
   static const objectType = 'pep:object';
 
-  factory GpxWaypoint.object(double lat, double lon,
-          {String? name, String? description, DateTime? time, List<XmlElement> extensions = const []}) =>
-      GpxWaypoint(lat, lon,
-          name: name, description: description, type: objectType, time: time, extensions: extensions);
+  factory GpxWaypoint.object(
+    double lat,
+    double lon, {
+    String? name,
+    String? description,
+    DateTime? time,
+    List<XmlElement> extensions = const [],
+  }) =>
+      GpxWaypoint(lat, lon, name: name, description: description, type: objectType, time: time, extensions: extensions);
 
   final String? name;
   final String? comment;
@@ -142,7 +153,7 @@ class Gpx {
             type: _text(t, 'type'),
             extensions: _extensions(t),
             segments: [
-              for (final s in _children(t, 'trkseg')) [for (final p in _children(s, 'trkpt')) _point(p)]
+              for (final s in _children(t, 'trkseg')) [for (final p in _children(s, 'trkpt')) _point(p)],
             ],
           ),
         for (final r in _children(root, 'rte'))
@@ -154,7 +165,7 @@ class Gpx {
             extensions: _extensions(r),
             isRoute: true,
             segments: [
-              [for (final p in _children(r, 'rtept')) _point(p)]
+              [for (final p in _children(r, 'rtept')) _point(p)],
             ],
           ),
       ],
@@ -188,16 +199,15 @@ class Gpx {
     List<GpxWaypoint>? waypoints,
     List<XmlElement>? metadataExtensions,
     List<XmlElement>? extensions,
-  }) =>
-      Gpx(
-        name: name ?? this.name,
-        description: description ?? this.description,
-        time: time ?? this.time,
-        tracks: tracks ?? this.tracks,
-        waypoints: waypoints ?? this.waypoints,
-        metadataExtensions: metadataExtensions ?? this.metadataExtensions,
-        extensions: extensions ?? this.extensions,
-      );
+  }) => Gpx(
+    name: name ?? this.name,
+    description: description ?? this.description,
+    time: time ?? this.time,
+    tracks: tracks ?? this.tracks,
+    waypoints: waypoints ?? this.waypoints,
+    metadataExtensions: metadataExtensions ?? this.metadataExtensions,
+    extensions: extensions ?? this.extensions,
+  );
 
   String toXml({String creator = 'Parcours et Pistes', bool pretty = true}) {
     final root = XmlElement(XmlName.qualified('gpx', namespaceUri: gpxNamespace), [
@@ -208,35 +218,37 @@ class Gpx {
     ]);
     final c = root.children;
     if (name != null || description != null || time != null || metadataExtensions.isNotEmpty) {
-      c.add(_el('metadata', [
-        _opt('name', name),
-        _opt('desc', description),
-        _opt('time', time?.toUtc().toIso8601String()),
-        _ext(metadataExtensions),
-      ]));
+      c.add(
+        _el('metadata', [
+          _opt('name', name),
+          _opt('desc', description),
+          _opt('time', time?.toUtc().toIso8601String()),
+          _ext(metadataExtensions),
+        ]),
+      );
     }
     for (final w in waypoints) {
-      c.add(_pointEl('wpt', w, [
-        _opt('name', w.name),
-        _opt('cmt', w.comment),
-        _opt('desc', w.description),
-        _opt('sym', w.symbol),
-        _opt('type', w.type),
-      ]));
+      c.add(
+        _pointEl('wpt', w, [
+          _opt('name', w.name),
+          _opt('cmt', w.comment),
+          _opt('desc', w.description),
+          _opt('sym', w.symbol),
+          _opt('type', w.type),
+        ]),
+      );
     }
     for (final t in tracks.where((t) => t.isRoute)) {
-      c.add(_el('rte', [
-        ..._trackHeader(t),
-        _ext(t.extensions),
-        for (final p in t.points) _pointEl('rtept', p),
-      ]));
+      c.add(_el('rte', [..._trackHeader(t), _ext(t.extensions), for (final p in t.points) _pointEl('rtept', p)]));
     }
     for (final t in tracks.where((t) => !t.isRoute)) {
-      c.add(_el('trk', [
-        ..._trackHeader(t),
-        _ext(t.extensions),
-        for (final s in t.segments) _el('trkseg', [for (final p in s) _pointEl('trkpt', p)]),
-      ]));
+      c.add(
+        _el('trk', [
+          ..._trackHeader(t),
+          _ext(t.extensions),
+          for (final s in t.segments) _el('trkseg', [for (final p in s) _pointEl('trkpt', p)]),
+        ]),
+      );
     }
     if (extensions.isNotEmpty) c.add(_ext(extensions)!);
     final doc = XmlDocument([XmlProcessing('xml', 'version="1.0" encoding="UTF-8"'), root]);
@@ -249,32 +261,38 @@ class Gpx {
   static XmlElement _el(String name, List<XmlElement?> children, [List<XmlAttribute> attrs = const []]) =>
       XmlElement(XmlName.qualified(name, namespaceUri: gpxNamespace), attrs, children.nonNulls);
 
-  static XmlElement? _opt(String name, String? v) => v == null ? null : XmlElement(XmlName.qualified(name, namespaceUri: gpxNamespace), [], [XmlText(v)]);
+  static XmlElement? _opt(String name, String? v) =>
+      v == null ? null : XmlElement(XmlName.qualified(name, namespaceUri: gpxNamespace), [], [XmlText(v)]);
 
-  static List<XmlElement?> _trackHeader(GpxTrack t) =>
-      [_opt('name', t.name), _opt('cmt', t.comment), _opt('desc', t.description), _opt('type', t.type)];
+  static List<XmlElement?> _trackHeader(GpxTrack t) => [
+    _opt('name', t.name),
+    _opt('cmt', t.comment),
+    _opt('desc', t.description),
+    _opt('type', t.type),
+  ];
 
   static XmlElement? _ext(List<XmlElement> ext) =>
       ext.isEmpty ? null : _el('extensions', [for (final e in ext) _forOutput(e)]);
 
   static XmlElement _pointEl(String tag, GpxPoint p, [List<XmlElement?> extra = const []]) => _el(
-        tag,
-        [
-          // GPX 1.1 schema order: ele, time, name, cmt, desc, …, sym, type, extensions.
-          _opt('ele', p.ele?.toString()),
-          _opt('time', p.time?.toUtc().toIso8601String()),
-          ...extra,
-          _ext(p.extensions),
-        ],
-        [XmlAttribute(XmlName.qualified('lat'), '${p.lat}'), XmlAttribute(XmlName.qualified('lon'), '${p.lon}')],
-      );
+    tag,
+    [
+      // GPX 1.1 schema order: ele, time, name, cmt, desc, …, sym, type, extensions.
+      _opt('ele', p.ele?.toString()),
+      _opt('time', p.time?.toUtc().toIso8601String()),
+      ...extra,
+      _ext(p.extensions),
+    ],
+    [XmlAttribute(XmlName.qualified('lat'), '${p.lat}'), XmlAttribute(XmlName.qualified('lon'), '${p.lon}')],
+  );
 
   /// Copy for writing: our namespace is declared on the root, so drop a
   /// redundant local declaration of it.
   static XmlElement _forOutput(XmlElement e) {
     final copy = e.copy();
-    copy.attributes.removeWhere((a) =>
-        a.name.prefix == 'xmlns' && a.name.local == pepPrefix && a.value == pepNamespace);
+    copy.attributes.removeWhere(
+      (a) => a.name.prefix == 'xmlns' && a.name.local == pepPrefix && a.value == pepNamespace,
+    );
     return copy;
   }
 
@@ -299,9 +317,8 @@ class Gpx {
   }
 
   /// Detached, self-contained copies of the children of [e]'s `<extensions>`.
-  static List<XmlElement> _extensions(XmlElement? e) => List.unmodifiable([
-        for (final x in _child(e, 'extensions')?.childElements ?? const <XmlElement>[]) _detach(x),
-      ]);
+  static List<XmlElement> _extensions(XmlElement? e) =>
+      List.unmodifiable([for (final x in _child(e, 'extensions')?.childElements ?? const <XmlElement>[]) _detach(x)]);
 
   /// Copies [e] out of its document, declaring every namespace prefix used in
   /// the subtree on the copy itself (the declarations usually live on the
@@ -339,18 +356,26 @@ class Gpx {
     return copy;
   }
 
-  static GpxPoint _point(XmlElement e) => GpxPoint(_coord(e, 'lat'), _coord(e, 'lon'),
-      ele: double.tryParse(_text(e, 'ele') ?? ''), time: _time(e), extensions: _extensions(e));
+  static GpxPoint _point(XmlElement e) => GpxPoint(
+    _coord(e, 'lat'),
+    _coord(e, 'lon'),
+    ele: double.tryParse(_text(e, 'ele') ?? ''),
+    time: _time(e),
+    extensions: _extensions(e),
+  );
 
-  static GpxWaypoint _waypoint(XmlElement e) => GpxWaypoint(_coord(e, 'lat'), _coord(e, 'lon'),
-      ele: double.tryParse(_text(e, 'ele') ?? ''),
-      time: _time(e),
-      extensions: _extensions(e),
-      name: _text(e, 'name'),
-      comment: _text(e, 'cmt'),
-      description: _text(e, 'desc'),
-      type: _text(e, 'type'),
-      symbol: _text(e, 'sym'));
+  static GpxWaypoint _waypoint(XmlElement e) => GpxWaypoint(
+    _coord(e, 'lat'),
+    _coord(e, 'lon'),
+    ele: double.tryParse(_text(e, 'ele') ?? ''),
+    time: _time(e),
+    extensions: _extensions(e),
+    name: _text(e, 'name'),
+    comment: _text(e, 'cmt'),
+    description: _text(e, 'desc'),
+    type: _text(e, 'type'),
+    symbol: _text(e, 'sym'),
+  );
 }
 
 /// Namespace URI of [e]: resolved in its document, or from a declaration on

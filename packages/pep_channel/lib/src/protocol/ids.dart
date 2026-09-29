@@ -24,7 +24,6 @@ bool isChannelId(String s) => _uuidRe.hasMatch(s);
 /// Item ids (and member ids): safe as a single MQTT topic level.
 bool isTopicId(String s) => _levelRe.hasMatch(s);
 
-String checkChannelId(String s) =>
-    isChannelId(s) ? s : throw FormatPepException('invalid channel id "$s"');
+String checkChannelId(String s) => isChannelId(s) ? s : throw FormatPepException('invalid channel id "$s"');
 
 String checkTopicId(String s) => isTopicId(s) ? s : throw FormatPepException('invalid id "$s"');

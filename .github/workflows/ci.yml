@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Dart SDK used by CI (the libraries require >= 3.9; developed with 3.13).
+  DART_SDK: stable
+
+jobs:
+  analyze:
+    name: Format and analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ env.DART_SDK }}
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+      - run: dart pub get
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed packages
+      - name: Analyze
+        run: dart analyze --fatal-infos packages
+
+  test:
+    name: Test ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [pep_content, pep_channel, pep_core]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ env.DART_SDK }}
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+      - run: dart pub get
+
+      - name: Start MQTT test broker
+        if: matrix.package != 'pep_content'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q mosquitto
+          .claude/scripts/broker.sh start
+
+      - name: Fetch sodium.js for browser tests
+        if: hashFiles(format('packages/{0}/test/web/template.html.tpl', matrix.package)) != ''
+        run: .claude/scripts/fetch_sodium_js.sh ${{ matrix.package }}
+
+      - name: Test (Dart VM, with coverage)
+        working-directory: packages/${{ matrix.package }}
+        run: dart test -p vm --coverage=coverage --reporter=github
+
+      - name: Test (Chrome)
+        working-directory: packages/${{ matrix.package }}
+        run: dart test -p chrome --reporter=github
+
+      - name: Convert coverage to LCOV
+        working-directory: packages/${{ matrix.package }}
+        run: >-
+          dart run coverage:format_coverage --lcov --check-ignore --in=coverage
+          --out=lcov.info --report-on=lib --base-directory="$GITHUB_WORKSPACE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.package }}
+          path: packages/${{ matrix.package }}/lcov.info
+          retention-days: 7
+
+      - name: Upload broker log on failure
+        if: failure() && matrix.package != 'pep_content'
+        uses: actions/upload-artifact@v4
+        with:
+          name: broker-log-${{ matrix.package }}
+          path: tools/broker/log/
+          retention-days: 7
+
+  coverage:
+    name: Coverage report
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage
+      - name: Merge LCOV files
+        run: cat coverage/*/lcov.info > coverage/lcov.info
+      - name: Summary
+        run: python3 .claude/scripts/coverage_summary.py coverage/lcov.info >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          retention-days: 30
+      - name: Upload to Codecov
+        # Runs only once the CODECOV_TOKEN repository secret exists.
+        if: env.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage/lcov.info
+          token: ${{ env.CODECOV_TOKEN }}
+          fail_ci_if_error: false

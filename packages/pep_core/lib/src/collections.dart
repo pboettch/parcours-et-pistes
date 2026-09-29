@@ -24,9 +24,9 @@ abstract final class PepCollections {
 
   /// Collections of a new project.
   static Map<String, CollectionPolicy> defaults({Duration positionTtl = defaultPositionTtl}) => {
-        info: const CollectionPolicy(Writers.owner),
-        track: const CollectionPolicy(Writers.editors),
-        member: const CollectionPolicy(Writers.self),
-        position: CollectionPolicy(Writers.self, ttl: positionTtl),
-      };
+    info: const CollectionPolicy(Writers.owner),
+    track: const CollectionPolicy(Writers.editors),
+    member: const CollectionPolicy(Writers.self),
+    position: CollectionPolicy(Writers.self, ttl: positionTtl),
+  };
 }

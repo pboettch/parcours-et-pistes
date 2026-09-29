@@ -12,8 +12,14 @@ import 'transport.dart';
 
 /// Broker connection settings.
 class BrokerConfig {
-  BrokerConfig(this.url,
-      {this.username, this.password, this.clientId, this.keepAlive = 30, this.pinnedCertificates = const {}});
+  BrokerConfig(
+    this.url, {
+    this.username,
+    this.password,
+    this.clientId,
+    this.keepAlive = 30,
+    this.pinnedCertificates = const {},
+  });
 
   /// `mqtt://host[:1883]`, `mqtts://host[:8883]`, `ws://host[:port]/path`,
   /// `wss://host[:port]/path`. Browsers support only ws/wss.
@@ -38,7 +44,7 @@ class BrokerConfig {
 /// automatic re-subscription).
 class Mqtt5Transport implements Transport {
   Mqtt5Transport(this.config, {String Function()? clientIdGenerator})
-      : _clientId = config.clientId ?? (clientIdGenerator ?? _randomClientId)();
+    : _clientId = config.clientId ?? (clientIdGenerator ?? _randomClientId)();
 
   final BrokerConfig config;
   final String _clientId;
@@ -97,9 +103,13 @@ class Mqtt5Transport implements Transport {
     _subs
       ..add(c.updates!.listen(_onUpdates))
       ..add(c.published!.listen((m) => _pendingPublish.remove(m.variableHeader!.messageIdentifier)?.complete()))
-      ..add(c.publishFail!.listen((ack) => _pendingPublish
-          .remove(ack.variableHeader!.messageIdentifier)
-          ?.completeError(TransportException('publish refused: ${ack.reasonCode}'))));
+      ..add(
+        c.publishFail!.listen(
+          (ack) => _pendingPublish
+              .remove(ack.variableHeader!.messageIdentifier)
+              ?.completeError(TransportException('publish refused: ${ack.reasonCode}')),
+        ),
+      );
     _setState(TransportState.connected);
   }
 
@@ -108,11 +118,13 @@ class Mqtt5Transport implements Transport {
       final m = r.payload;
       if (m is! MqttPublishMessage || r.topic == null) continue;
       final data = m.payload.message;
-      _messages.add(TransportMessage(
-        r.topic!,
-        data == null ? Uint8List(0) : Uint8List.fromList(data),
-        retained: m.header?.retain ?? false,
-      ));
+      _messages.add(
+        TransportMessage(
+          r.topic!,
+          data == null ? Uint8List(0) : Uint8List.fromList(data),
+          retained: m.header?.retain ?? false,
+        ),
+      );
     }
   }
 
@@ -186,6 +198,5 @@ class Mqtt5Transport implements Transport {
 
   static final _rnd = Random.secure();
 
-  static String _randomClientId() =>
-      'pep-${List.generate(12, (_) => _rnd.nextInt(36).toRadixString(36)).join()}';
+  static String _randomClientId() => 'pep-${List.generate(12, (_) => _rnd.nextInt(36).toRadixString(36)).join()}';
 }

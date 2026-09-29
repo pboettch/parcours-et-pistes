@@ -7,12 +7,12 @@ import 'package:pep_content/pep_content.dart';
 /// sections) plus the channel metadata of its current revision.
 class Track {
   Track(ChannelItem item, {Gpx? parsed})
-      : id = item.id,
-        rev = item.rev,
-        updated = item.time,
-        signerId = item.signerId,
-        gpx = utf8.decode(item.body),
-        _parsed = parsed;
+    : id = item.id,
+      rev = item.rev,
+      updated = item.time,
+      signerId = item.signerId,
+      gpx = utf8.decode(item.body),
+      _parsed = parsed;
 
   final Gpx? _parsed;
 
