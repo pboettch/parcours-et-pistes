@@ -22,11 +22,21 @@ abstract final class PepCollections {
 
   static const defaultPositionTtl = Duration(minutes: 30);
 
+  /// Runs (`Run`: a dog on a track, its designated position source), owner
+  /// and editors.
+  static const run = 'run';
+
+  /// Recorded paths (GPX, one track segment per member, device and hour), so
+  /// that the path of a dog can be shown to members who were not online.
+  static const trace = 'trace';
+
   /// Collections of a new project.
   static Map<String, CollectionPolicy> defaults({Duration positionTtl = defaultPositionTtl}) => {
     info: const CollectionPolicy(Writers.owner),
     track: const CollectionPolicy(Writers.editors),
     member: const CollectionPolicy(Writers.self),
     position: CollectionPolicy(Writers.self, ttl: positionTtl),
+    run: const CollectionPolicy(Writers.editors),
+    trace: const CollectionPolicy(Writers.self),
   };
 }

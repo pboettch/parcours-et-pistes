@@ -29,7 +29,7 @@ Three packages in one Dart workspace (root `pubspec.yaml`):
 | Package | Responsibility | Depends on |
 |---|---|---|
 | `pep_channel` | Transport (MQTT 5), crypto, envelope, owner-signed metadata and access list, `SecureChannel`: collections of opaque items with writer policies, revisions, tombstones, expiry, sync barrier, password rotation | sodium, mqtt5_client, archive |
-| `pep_content` | `Gpx` (with `pep` extensions), `Position`, `MemberProfile`, `ProjectInfo`: data types and byte codecs | xml |
+| `pep_content` | `Gpx` (with `pep` extensions), `Position`, `MemberProfile`, `ProjectInfo`, `Run`, `TrailInfo`: data types and byte codecs; geometry (`TrackLine`), progress matching (`TrailProgress`), simulated walks (`TrailWalker`) | xml |
 | `pep_core` | `ProjectSession` facade (the apps' API), `PepCollections` (content ↔ collection mapping), `pep` CLI | both |
 
 The channel never interprets item bodies: every security decision uses the topic, the signer
@@ -106,8 +106,28 @@ Changing the recipients = publishing a new revision; members dropped from the li
 |---|---|---|---|---|
 | `info` | `project` | owner | — | `ProjectInfo` JSON: name, desc, disc (`ru`/`mt`), extra |
 | `track` | random | editors | — | the GPX document (UTF-8), see *Track content* |
-| `member` | member pseudonym | self | — | `MemberProfile` JSON: name |
+| `member` | member pseudonym | self | — | `MemberProfile` JSON: name, bot?, extra? |
 | `pos` | member pseudonym [`.device`] | self | project setting (default 30 min) | `Position` JSON: lat, lon, ts (fix time), alt?, acc?, hdg?, spd? |
+| `run` | random | editors | — | `Run` JSON: track (id), dog, handler?, src [{m: member id, t: since ms}], start?, end?, extra? |
+| `trace` | member pseudonym `.h<hour>[-device]` | self | — | GPX with one track segment: the member's recorded path during that hour (UTC hours since the epoch) |
+
+Collections added by a version are declared in new projects; the owner's session adds them to
+older projects when it joins (`ProjectSession.ensureCollections`).
+
+### Runs: the dog's position
+A dog carries no phone. Its position is the one shared by a member the project leader (owner or
+an editor) designates in the run: the official follower of the handler's group, or a **bot**
+member (`MemberProfile.bot`) such as a service feeding a GPS collar (Tractive) into the project
+with its own identity. The designated member can change during the day; `Run.src` keeps every
+change, so the dog's path is the concatenation of each source's path over its period.
+
+While a member is the source of an unfinished run, its sessions record its positions (accuracy
+≤ 50 m) into `trace` (default `TraceMode.whenSource`; republished at most every 30 s), so members
+joining later also see the dog's path. `ProjectSession.dogPath` combines the recordings and the
+live position; `runProgress` matches the path against the track (`TrailProgress`: first
+confirmed start near the beginning of the track, then a forward-only cursor limited by the
+distance actually travelled, until the path leaves the track for good — ported from the CCO
+prototype).
 
 ## Topic layout
 Base `pep/v1` (configurable). All messages are retained except `sync` probes.
@@ -154,8 +174,15 @@ as is; id, revision, publish time and deletion are channel data.
 - RU objects: `<wpt>` with `<type>pep:object</type>`.
 - Additional information: custom `<extensions>` sections in the namespace
   `urn:parcours-et-pistes:gpx:1` (prefix `pep`) — at file level (`<metadata><extensions>`,
-  root `<extensions>`), on waypoints/objects, tracks/routes and points. The exact elements for
-  RU details are still to be specified.
+  root `<extensions>`), on waypoints/objects, tracks/routes and points.
+- Useful places (parking, meeting point): `<wpt>` with `<type>pep:place</type>`, `<name>` = label.
+- Official RU trail details: `<metadata><extensions><pep:trail code="V1" level="I" setter="…"/>`
+  (`TrailInfo`). **Placeholder** for the official trail sheet ("description de pose"): the
+  organizers' part (prepared beforehand) and the judge's part (filled in during the trail on a
+  tablet) will be added as further `pep:` elements, and the app will generate the printable
+  documents from them.
+- GPX files from other tools (e.g. Visorando) mark nothing: `objectsFromWaypoints` turns plain
+  waypoints that are not at the start or end of the track into objects.
 - Foreign extensions (e.g. Garmin) are preserved on parse → write; each preserved element carries
   its own namespace declarations. Other unknown elements are dropped when a GPX is rewritten
   (the GPX string is published byte for byte unless an app rewrites it).

@@ -17,4 +17,5 @@ export 'src/position.dart';
 export 'src/progress.dart';
 export 'src/project_info.dart';
 export 'src/run.dart';
+export 'src/simulation.dart';
 export 'src/trail.dart';

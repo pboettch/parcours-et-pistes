@@ -21,7 +21,14 @@ cat > "$work/trail.gpx" <<'GPX'
   </trkseg></trk>
 </gpx>
 GPX
-O=(--identity "$work/owner.id"); A=(--identity "$work/alice.id")
+# A straight 400 m track heading north, for the simulated dog.
+{
+  echo '<?xml version="1.0" encoding="UTF-8"?>'
+  echo '<gpx version="1.1" creator="e2e" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Ligne</name><trkseg>'
+  for i in $(seq 0 8); do printf '<trkpt lat="%s" lon="5.3"/>\n' "$(echo "45.2 + $i * 50 / 111195" | bc -l)"; done
+  echo '</trkseg></trk></gpx>'
+} > "$work/line.gpx"
+O=(--identity "$work/owner.id"); A=(--identity "$work/alice.id"); B=(--identity "$work/bot.id")
 
 step "owner creates project"
 link=$(pep create "${O[@]}" -p pw1 --name "Forêt de Chambaran" --discipline ru --gpx "$work/trail.gpx" | tail -1)
@@ -58,6 +65,17 @@ echo "backup: ${backup:0:24}… (${#backup} chars)"
 restored=$(pep identity import "$backup" --identity "$work/alice-tablet.id" --passphrase "sésame" | tail -1)
 [[ $restored == "$alice" ]] && echo "same member id on the new device"
 pep pos "$link" --identity "$work/alice-tablet.id" --device tablet -p pw1 45.2010 5.3010
+
+step "a run: the owner designates the collar bot as the dog's position; simulated dog"
+bot=$(pep id "${B[@]}" | tail -1)
+pep name "$link" "${B[@]}" -p pw1 --bot "Tractive"
+line=$(pep push "$link" "${O[@]}" -p pw1 --gpx "$work/line.gpx" | cut -d' ' -f1)
+run=$(pep run "$link" "${O[@]}" -p pw1 add --track "$line" --dog Rex --handler Ana --source "$bot" | tail -1)
+pep run "$link" "${O[@]}" -p pw1 start "$run"
+pep replay "$link" "${B[@]}" -p pw1 "$work/line.gpx" --speed 2 --rate 50 --interval 5
+pep run "$link" "${A[@]}" -p pw1 list | tee "$work/run.txt"
+grep -Eq "Rex / Ana on $line, running, source Tractive .*, (9[0-9]|100)%" "$work/run.txt"
+pep run "$link" "${O[@]}" -p pw1 finish "$run"
 
 step "broker view (admin wildcard): only meta is plaintext, no member ids in topics"
 mosquitto_sub -V mqttv5 -p 18883 -t "pep/v1/$pid/#" -W 1 -F '%t %l bytes, starts with: %x' 2>/dev/null \

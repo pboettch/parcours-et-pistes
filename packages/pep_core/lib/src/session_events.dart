@@ -54,6 +54,27 @@ class PositionRemoved extends SessionEvent {
   final String memberId;
 }
 
+class RunUpdated extends SessionEvent {
+  const RunUpdated(this.runId, this.run);
+
+  final String runId;
+  final Run run;
+}
+
+class RunRemoved extends SessionEvent {
+  const RunRemoved(this.runId);
+
+  final String runId;
+}
+
+/// New points were recorded in the path of member [memberId] (see
+/// `ProjectSession.trace`).
+class TraceUpdated extends SessionEvent {
+  const TraceUpdated(this.memberId);
+
+  final String memberId;
+}
+
 /// The owner offered the project ownership to this member; take it over with
 /// `ProjectSession.acceptOwnership`.
 class OwnershipOffered extends SessionEvent {

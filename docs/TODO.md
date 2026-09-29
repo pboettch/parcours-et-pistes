@@ -41,6 +41,16 @@ Items that belong to the Flutter apps (the libraries already provide what they n
 - [ ] Background location sharing on iOS and Android (OwnTracks as behavioural reference):
       periodic `publishPosition`, stop with `clearPosition`.
 
+## Runs (events: several dogs on several tracks)
+- [ ] Run management UI for the leader: create a run (track, dog, handler), designate the
+      position source among members (incl. bots), change it during the day, start/finish.
+- [ ] Map: dog marker from the source's position, dog path (`dogPath`), covered part of the track
+      and percentage (`runProgress`), distance from the dog to the track, corridors.
+- [ ] Tell a member when they become (or stop being) a run's source (recording indicator).
+
 ## RU specifics
-- [ ] Define the `pep:` GPX extension elements for RU track details and objects (to come from
-      the project owner), then add typed accessors in `pep_content`.
+- [ ] Official trail sheet ("description de pose"): define the `pep:` elements for the
+      organizers' part (date, times of pose / prise de piste, start area, objects: placement
+      description and material, end, places) and the judge's part (conditions, encounters,
+      observations during the trail); extend `TrailInfo`; forms in the app (judge on a tablet);
+      generate the official printable documents.

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:pep_channel/pep_channel.dart' as ch;
@@ -8,7 +9,18 @@ import 'package:pep_content/pep_content.dart' hide utf8Bytes;
 import 'collections.dart';
 import 'project.dart';
 import 'session_events.dart';
+import 'trace_recorder.dart';
 import 'track.dart';
+
+/// When a session records its own positions into its path (`trace`).
+enum TraceMode {
+  never,
+
+  /// While this member is the designated position source of an unfinished
+  /// run (the default): the dog's path is kept for everyone.
+  whenSource,
+  always,
+}
 
 /// A Parcours et Pistes project on one device: the content model
 /// (`pep_content`) mapped onto a [SecureChannel] (`pep_channel`), see
@@ -19,7 +31,9 @@ import 'track.dart';
 /// content. Items of collections it does not know (content types added by
 /// newer app versions) are ignored.
 class ProjectSession {
-  ProjectSession._(this.channel, this.deviceId) {
+  ProjectSession._(this.channel, this.deviceId, DateTime Function()? clock, Duration traceFlushInterval)
+    : _clock = clock ?? DateTime.now {
+    _recorder = TraceRecorder(channel, deviceId: deviceId, flushInterval: traceFlushInterval);
     _sub = channel.events.listen(_onChannelEvent);
   }
 
@@ -39,6 +53,7 @@ class ProjectSession {
     DateTime Function()? clock,
     Duration pruneInterval = const Duration(seconds: 15),
     String? deviceId,
+    Duration traceFlushInterval = defaultTraceFlushInterval,
   }) async {
     final channel = await SecureChannel.create(
       crypto: crypto,
@@ -57,7 +72,7 @@ class ProjectSession {
       PepCollections.infoId,
       ProjectInfo(name: name, description: description, discipline: discipline).encode(),
     );
-    return ProjectSession._(channel, deviceId);
+    return ProjectSession._(channel, deviceId, clock, traceFlushInterval);
   }
 
   /// Joins an existing project from its invitation [link] and [password].
@@ -65,6 +80,9 @@ class ProjectSession {
   ///
   /// Throws [WrongPasswordException], or [ChannelNotFoundException] when no
   /// project signed by the owner named in the link is found.
+  ///
+  /// The owner's session adds collections introduced by newer versions to the
+  /// project ([ensureCollections]).
   static Future<ProjectSession> join({
     required PepCrypto crypto,
     required Transport transport,
@@ -75,6 +93,7 @@ class ProjectSession {
     DateTime Function()? clock,
     Duration pruneInterval = const Duration(seconds: 15),
     String? deviceId,
+    Duration traceFlushInterval = defaultTraceFlushInterval,
   }) async {
     final channel = await SecureChannel.join(
       crypto: crypto,
@@ -86,11 +105,12 @@ class ProjectSession {
       clock: clock,
       pruneInterval: pruneInterval,
     );
-    final s = ProjectSession._(channel, deviceId);
+    final s = ProjectSession._(channel, deviceId, clock, traceFlushInterval);
     if (s._projectOrNull == null) {
       await s.close(clearPosition: false);
       throw const ChannelNotFoundException('no valid project information in the channel');
     }
+    if (s.isOwner && !s.locked) await s.ensureCollections();
     return s;
   }
 
@@ -101,6 +121,17 @@ class ProjectSession {
   /// so that several devices of one user share positions side by side. Null:
   /// one position per member.
   final String? deviceId;
+
+  static const defaultTraceFlushInterval = Duration(seconds: 30);
+
+  /// Positions less accurate than this (m) are not recorded into the path.
+  static const traceMaxAccuracy = 50.0;
+
+  /// When this session records its positions into its path.
+  TraceMode traceMode = TraceMode.whenSource;
+
+  final DateTime Function() _clock;
+  late final TraceRecorder _recorder;
 
   /// Member id by self item id (pseudonym), to name removed items.
   final _selfOwners = <String, String>{};
@@ -145,6 +176,52 @@ class ProjectSession {
   /// Fresh positions by member id (the most recent one when a member shares
   /// from several devices).
   Map<String, Position> get positions => _bySigner(PepCollections.position, Position.decode);
+
+  /// Runs by id.
+  Map<String, Run> get runs => _all(PepCollections.run, (i) => _decode(i, Run.decode));
+
+  /// Whether this session currently records its positions (see [traceMode]).
+  bool get recordingTrace => switch (traceMode) {
+    TraceMode.never => false,
+    TraceMode.always => true,
+    TraceMode.whenSource => runs.values.any((r) => r.status != RunStatus.finished && r.source == memberId),
+  };
+
+  /// The recorded path of [memberId] (all devices), in time order.
+  List<TimedPoint> trace(String memberId) {
+    final out = <TimedPoint>[
+      for (final i in channel.items(PepCollections.trace).values)
+        if (i.signerId == memberId) ...?_decode(i, _tracePoints),
+    ]..sort((a, b) => a.time.compareTo(b.time));
+    return out;
+  }
+
+  /// The path of the dog of run [runId]: the recorded paths and live
+  /// positions of its successive position sources, each over its period.
+  List<TimedPoint> dogPath(String runId) {
+    final run = runs[runId];
+    if (run == null) return const [];
+    final out = <TimedPoint>[];
+    for (final (member, from, until) in run.sourceIntervals) {
+      bool within(DateTime t) => !t.isBefore(from) && (until == null || t.isBefore(until));
+      final part = trace(member).where((p) => within(p.time)).toList();
+      final live = positions[member];
+      if (live != null && within(live.time) && (part.isEmpty || live.time.isAfter(part.last.time))) {
+        part.add(TimedPoint(live.lat, live.lon, live.time));
+      }
+      out.addAll(part);
+    }
+    return out..sort((a, b) => a.time.compareTo(b.time));
+  }
+
+  /// How far the dog of run [runId] has come along its track; null when the
+  /// run or its track is unknown.
+  TrailProgress? runProgress(String runId, {ProgressParams params = const ProgressParams()}) {
+    final run = runs[runId];
+    final points = run == null ? null : tracks[run.track]?.document.tracks.expand((t) => t.points).toList();
+    if (points == null || points.isEmpty) return null;
+    return TrailProgress.match(TrackLine(points), dogPath(runId), params: params);
+  }
 
   /// Whether the owner offered the project ownership to this member.
   bool get ownershipOfferedToMe => channel.ownershipOfferedToMe;
@@ -197,15 +274,56 @@ class ProjectSession {
   /// the former owner becomes an editor.
   Future<void> acceptOwnership() => channel.acceptOwnership();
 
+  /// Shares this device's position, and records it into this member's path
+  /// when [recordingTrace].
   Future<void> publishPosition(Position position) async {
     await channel.put(PepCollections.position, channel.selfItemId(device: deviceId), position.encode());
+    if (recordingTrace && (position.accuracy ?? 0) <= traceMaxAccuracy) await _recorder.add(position);
   }
 
   Future<void> clearPosition() => channel.delete(PepCollections.position, channel.selfItemId(device: deviceId));
 
-  Future<void> setMemberName(String name) async {
-    await channel.put(PepCollections.member, channel.selfItemId(), MemberProfile(name: name).encode());
+  /// Publishes this member's profile; [bot] marks an automated member (e.g. a
+  /// service feeding a GPS collar).
+  Future<void> setMemberName(String name, {bool bot = false}) async {
+    await channel.put(PepCollections.member, channel.selfItemId(), MemberProfile(name: name, bot: bot).encode());
   }
+
+  /// Creates run [id] (default: a new id) or replaces it; returns its id.
+  /// Owner and editors.
+  Future<String> putRun(Run run, {String? id}) async {
+    final rid = id ?? channel.generateItemId();
+    await channel.put(PepCollections.run, rid, run.encode());
+    return rid;
+  }
+
+  Future<void> deleteRun(String id) => channel.delete(PepCollections.run, id);
+
+  /// Designates [memberId] as the one sharing the dog's position in run
+  /// [runId], from now on.
+  Future<void> setRunSource(String runId, String memberId) {
+    publicKeyFromId(memberId);
+    return _updateRun(runId, (r) => r.withSource(memberId, _now()));
+  }
+
+  Future<void> startRun(String runId) => _updateRun(runId, (r) => r.start(_now()));
+
+  Future<void> finishRun(String runId) => _updateRun(runId, (r) => r.finish(_now()));
+
+  /// Owner only: adds the collections of this version missing from a project
+  /// created by an older one.
+  Future<void> ensureCollections() async {
+    if (!isOwner) throw const AuthorizationException('only the project owner can do this');
+    final current = channel.acl.collections;
+    final missing = {
+      for (final e in PepCollections.defaults().entries)
+        if (!current.containsKey(e.key)) e.key: e.value,
+    };
+    if (missing.isNotEmpty) await channel.updateAcl(collections: {...current, ...missing});
+  }
+
+  /// Publishes the positions recorded but not yet published.
+  Future<void> flushTrace() => _recorder.flush();
 
   /// Owner only; see [SecureChannel.changePassword].
   Future<void> changePassword(String newPassword, {KdfParams? kdf}) => channel.changePassword(newPassword, kdf: kdf);
@@ -218,17 +336,36 @@ class ProjectSession {
 
   /// Owner only: removes the project from the broker and closes the session.
   Future<void> deleteProject() async {
+    _recorder.cancel();
     await channel.deleteChannel();
     await _shutdown();
   }
 
   /// Stops syncing; by default clears the position shared by this session.
   Future<void> close({bool clearPosition = true}) async {
+    try {
+      await _recorder.flush();
+    } on PepException {
+      _recorder.cancel(); // e.g. locked: keeps what was published
+    }
     await channel.close(clearEphemeral: clearPosition);
     await _shutdown();
   }
 
   // ------------------------------------------------------------ internals
+
+  DateTime _now() => _clock().toUtc();
+
+  Future<void> _updateRun(String runId, Run Function(Run) change) async {
+    final run = runs[runId];
+    if (run == null) throw ArgumentError.value(runId, 'runId', 'unknown run');
+    await putRun(change(run), id: runId);
+  }
+
+  static List<TimedPoint> _tracePoints(Uint8List body) => [
+    for (final p in Gpx.parse(utf8.decode(body)).tracks.expand((t) => t.points))
+      if (p.time != null) TimedPoint(p.lat, p.lon, p.time!),
+  ];
 
   Future<void> _shutdown() async {
     await _sub.cancel();
@@ -294,6 +431,10 @@ class ProjectSession {
           case PepCollections.position:
             // Another device of the same member may still share a position.
             if (_selfOwners[id] case final m? when !positions.containsKey(m)) _emit(PositionRemoved(m));
+          case PepCollections.run:
+            _emit(RunRemoved(id));
+          case PepCollections.trace:
+            if (_selfOwners[id] case final m?) _emit(TraceUpdated(m));
         }
       case ch.PasswordChanged():
         _emit(const PasswordChanged());
@@ -306,7 +447,7 @@ class ProjectSession {
 
   void _onItem(ChannelItem item) {
     final topic = channel.topics.item(item.collection, item.id);
-    if (item.collection == PepCollections.member || item.collection == PepCollections.position) {
+    if (const {PepCollections.member, PepCollections.position, PepCollections.trace}.contains(item.collection)) {
       _selfOwners[item.id] = item.signerId;
     }
     SessionEvent? event;
@@ -323,6 +464,11 @@ class ProjectSession {
       case PepCollections.position:
         final p = _decode(item, Position.decode);
         if (p != null) event = PositionUpdated(item.signerId, p);
+      case PepCollections.run:
+        final r = _decode(item, Run.decode);
+        if (r != null) event = RunUpdated(item.id, r);
+      case PepCollections.trace:
+        if (_decode(item, _tracePoints) != null) event = TraceUpdated(item.signerId);
       default:
         return; // content type unknown to this version: ignored
     }

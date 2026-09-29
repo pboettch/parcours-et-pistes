@@ -6,6 +6,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:args/args.dart';
 import 'package:pep_core/pep_core.dart';
@@ -55,7 +56,25 @@ Future<void> main(List<String> argv) async {
     ..addCommand('rm', _common())
     ..addCommand('export', _common()..addOption('out', defaultsTo: '.'))
     ..addCommand('pos', _common()..addOption('acc'))
-    ..addCommand('name', _common())
+    ..addCommand('name', _common()..addFlag('bot', negatable: false, help: 'Mark this member as automated'))
+    ..addCommand(
+      'run',
+      _common()
+        ..addOption('track', help: 'Track id (add)')
+        ..addOption('dog', help: 'Dog name (add)')
+        ..addOption('handler', help: 'Handler name (add)')
+        ..addOption('source', help: 'Member sharing the dog position (add)'),
+    )
+    ..addCommand(
+      'replay',
+      _common()
+        ..addOption('speed', help: 'Walking speed in m/s', defaultsTo: '0.8')
+        ..addOption('rate', help: 'Time acceleration factor', defaultsTo: '1')
+        ..addOption('interval', help: 'Seconds between positions', defaultsTo: '5')
+        ..addOption('name', help: 'Display name to publish first')
+        ..addFlag('bot', negatable: false, help: 'Publish the display name as a bot')
+        ..addFlag('record', negatable: false, help: 'Always record the path (default: while run source)'),
+    )
     ..addCommand('editor', _common())
     ..addCommand('passwd', _common()..addOption('new', mandatory: true))
     ..addCommand('delete', _common());
@@ -148,6 +167,7 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
     case 'info':
       _printInfo(s);
       _printTracks(s);
+      _printRuns(s);
     case 'watch':
       _printInfo(s);
       stderr.writeln('watching, Ctrl-C to stop');
@@ -182,7 +202,13 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
       return;
     case 'name':
       if (extra.isEmpty) throw const FormatPepException('usage: pep name <link> <display name>');
-      await s.setMemberName(extra.join(' '));
+      await s.setMemberName(extra.join(' '), bot: cmd.flag('bot'));
+    case 'run':
+      await _runCommand(s, cmd, extra);
+    case 'replay':
+      if (extra.length != 1) throw const FormatPepException('usage: pep replay <link> <gpx file>');
+      await _replay(s, cmd, File(extra.single).readAsStringSync());
+      return;
     case 'editor':
       if (extra.length != 2 || !const {'add', 'remove'}.contains(extra[0])) {
         throw const FormatPepException('usage: pep editor <link> add|remove <member id>');
@@ -245,6 +271,14 @@ Future<void> _watch(ProjectSession s) async {
       case ProjectDeleted():
         print('$t project deleted');
         stop();
+      case RunUpdated(:final runId, :final run):
+        print('$t run $runId: ${_runSummary(s, runId, run)}');
+      case RunRemoved(:final runId):
+        print('$t run $runId removed');
+      case TraceUpdated(:final memberId):
+        for (final r in s.runs.entries.where((r) => r.value.source == memberId)) {
+          print('$t run ${r.key}: ${_runSummary(s, r.key, r.value)}');
+        }
       case MessageRejected(:final topic, :final error):
         print('$t REJECTED $topic: $error');
     }
@@ -267,6 +301,77 @@ void _printTracks(ProjectSession s) {
     final vis = t.visibleTo == null ? '' : ' visible to ${t.visibleTo!.map(_short).join(', ')}';
     print('track    ${t.id} rev ${t.rev} "${t.name ?? ''}" (${_gpxSummary(t.gpx)})$vis');
   }
+}
+
+void _printRuns(ProjectSession s) {
+  for (final r in s.runs.entries) {
+    print('run      ${r.key}: ${_runSummary(s, r.key, r.value)}');
+  }
+}
+
+String _runSummary(ProjectSession s, String id, Run r) {
+  final p = s.runProgress(id);
+  final progress = p == null ? 'track unknown' : (p.started ? '${(p.fraction * 100).round()}%' : 'not started');
+  return '${r.dog}${r.handler == null ? '' : ' / ${r.handler}'} on ${r.track}, ${r.status.name}, '
+      'source ${r.source == null ? '-' : _who(s, r.source!)}, $progress';
+}
+
+Future<void> _runCommand(ProjectSession s, ArgResults cmd, List<String> extra) async {
+  switch (extra) {
+    case ['add']:
+      final track = cmd.option('track'), dog = cmd.option('dog');
+      if (track == null || dog == null) throw const FormatPepException('run add needs --track and --dog');
+      var run = Run(track: track, dog: dog, handler: cmd.option('handler'));
+      if (cmd.option('source') case final m?) run = run.withSource(m, DateTime.now().toUtc());
+      print(await s.putRun(run));
+    case ['list']:
+      _printRuns(s);
+    case ['source', final id, final member]:
+      await s.setRunSource(id, member);
+    case ['start', final id]:
+      await s.startRun(id);
+    case ['finish', final id]:
+      await s.finishRun(id);
+    case ['rm', final id]:
+      await s.deleteRun(id);
+    default:
+      throw const FormatPepException(
+        'usage: pep run <link> add --track T --dog D [--handler H] [--source M] | list'
+        ' | source <run> -- <member> | start <run> | finish <run> | rm <run>',
+      );
+  }
+}
+
+/// Walks along the first track of [gpx], publishing positions, until the end
+/// of the track or Ctrl-C.
+Future<void> _replay(ProjectSession s, ArgResults cmd, String gpx) async {
+  final points = Gpx.parse(gpx).tracks.expand((t) => t.points).toList();
+  if (points.isEmpty) throw const FormatPepException('the GPX file has no track points');
+  if (cmd.option('name') case final n?) await s.setMemberName(n, bot: cmd.flag('bot'));
+  if (cmd.flag('record')) s.traceMode = TraceMode.always;
+  final walker = TrailWalker(TrackLine(points), speed: double.parse(cmd.option('speed')!));
+  final rate = double.parse(cmd.option('rate')!);
+  final interval = Duration(milliseconds: (double.parse(cmd.option('interval')!) * 1000 / rate).round());
+  var stop = false;
+  final sig = ProcessSignal.sigint.watch().listen((_) => stop = true);
+  final start = DateTime.now();
+  stderr.writeln('walking ${walker.line.length.round()} m, ${walker.duration.inMinutes} min at x$rate; Ctrl-C to stop');
+  while (!stop) {
+    final elapsed = DateTime.now().difference(start) * rate;
+    final p = walker.at(elapsed);
+    await s.publishPosition(
+      Position(lat: p.lat, lon: p.lon, time: DateTime.now().toUtc(), accuracy: 4 + math.Random().nextDouble() * 4),
+    );
+    stderr.write(
+      '\r${(math.min(1, elapsed.inMilliseconds / walker.duration.inMilliseconds) * 100).round()}% '
+      '${s.recordingTrace ? '(recording)' : ''}   ',
+    );
+    if (walker.finishedAt(elapsed)) break;
+    await Future<void>.delayed(interval);
+  }
+  stderr.writeln();
+  await sig.cancel();
+  await s.close(clearPosition: false);
 }
 
 String _gpxSummary(String gpx) {
@@ -356,7 +461,12 @@ commands:
   rm <link> <track id>                delete a track (owner/editor)
   export <link> [--out dir]           write all tracks as .gpx files
   pos <link> <lat> <lon> [--acc m]    share a position
-  name <link> <display name>          set your display name
+  name <link> <display name> [--bot]  set your display name (--bot: automated member)
+  run <link> add --track T --dog D [--handler H] [--source M]   create a run (owner/editor)
+  run <link> list | source <run> -- <member> | start <run> | finish <run> | rm <run>
+                                      manage runs; the source shares the dog's position
+  replay <link> <gpx> [--speed m/s] [--rate x] [--name N] [--bot] [--record]
+                                      simulate a dog walking the track (publishes positions)
   editor <link> add|remove -- <member>  manage editors (owner; "--" because ids may start with "-")
   owner <link> offer -- <member> | cancel | accept   transfer the project ownership
   passwd <link> --new P               change the project password (owner)

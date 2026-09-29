@@ -8,8 +8,8 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
 - Dart workspace (root `pubspec.yaml`) with three pure Dart packages:
   - `packages/pep_channel/` — secure channel (transport, crypto, envelope, ACL, `SecureChannel`);
     never interprets item bodies.
-  - `packages/pep_content/` — content model (GPX + pep extensions, Position, MemberProfile,
-    ProjectInfo); no crypto, no MQTT.
+  - `packages/pep_content/` — content model (GPX + pep extensions, Position, MemberProfile, Run,
+    ProjectInfo, TrailInfo) + geometry/progress/simulation; no crypto, no MQTT.
   - `packages/pep_core/` — `ProjectSession` facade mapping content onto collections
     (`PepCollections`), the apps' API; `pep` CLI.
   New content type = data type in pep_content + collection in PepCollections.

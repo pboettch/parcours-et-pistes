@@ -39,6 +39,24 @@ const gpxA = '''<?xml version="1.0" encoding="UTF-8"?>
 
 final gpxB = gpxA.replaceAll('45.2005', '45.2105');
 
+/// Metres per degree of latitude.
+const _mPerDeg = earthRadius * 3.141592653589793 / 180;
+
+/// A point [north] metres north of (45.2, 5.3).
+GeoPoint north(double m) => GeoPoint(45.2 + m / _mPerDeg, 5.3);
+
+/// A straight 600 m track heading north.
+final lineGpx = Gpx(
+  name: 'Ligne droite',
+  tracks: [
+    GpxTrack(
+      segments: [
+        [for (var m = 0.0; m <= 600; m += 50) GpxPoint(north(m).lat, north(m).lon)],
+      ],
+    ),
+  ],
+).toXml();
+
 /// [gpx] with a GPX metadata name (the track's display name).
 String named(String gpx, String name) =>
     gpx.replaceFirstMapped(RegExp(r'<gpx[^>]*>'), (m) => '${m[0]}<metadata><name>$name</name></metadata>');
@@ -96,6 +114,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
             kdf: fastKdf(c),
             clock: h.clock,
             pruneInterval: const Duration(hours: 1),
+            traceFlushInterval: Duration.zero,
           ),
         );
 
@@ -105,6 +124,8 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       String password = 'pw-1',
       JoinLink? link,
       Duration timeout = const Duration(seconds: 5),
+      String? deviceId,
+      Duration traceFlushInterval = Duration.zero,
     }) async => track(
       await ProjectSession.join(
         crypto: c,
@@ -115,10 +136,29 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
         timeout: timeout,
         clock: h.clock,
         pruneInterval: const Duration(hours: 1),
+        deviceId: deviceId,
+        traceFlushInterval: traceFlushInterval,
       ),
     );
 
     DateTime now() => (h.clock ?? DateTime.now)().toUtc();
+
+    /// Lets time pass (fake clock), so that successive steps get distinct times.
+    Future<void> tick([Duration d = const Duration(seconds: 10)]) async {
+      if (h.clock != null) {
+        h.advance(d);
+      } else {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    }
+
+    /// [s] walks through the given distances along [lineGpx].
+    Future<void> walk(ProjectSession s, Iterable<double> metres) async {
+      for (final m in metres) {
+        await s.publishPosition(Position(lat: north(m).lat, lon: north(m).lon, time: now(), accuracy: 5));
+        await tick();
+      }
+    }
 
     test('create and join: project, owner, link', () async {
       final o = await create();
@@ -397,6 +437,108 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       await eventually(() => events[o]!.whereType<MemberUpdated>().any((e) => e.memberId == aliceId.id));
       await o.changePassword('pw-2', kdf: fastKdf(c));
       await eventually(() => events[o]!.whereType<MemberRemoved>().any((e) => e.memberId == aliceId.id));
+    });
+
+    test('runs: the designated source records the dog path; progress', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      final b = await join(o, bobId);
+      await a.setMemberName('Alice');
+      final t = await o.publishTrack(gpx: lineGpx);
+      final runId = await o.putRun(Run(track: t.id, dog: 'Rex', handler: 'Ana'));
+      await eventually(() => a.runs.containsKey(runId) && b.runs.containsKey(runId));
+      expect(a.runs[runId]!.status, RunStatus.planned);
+      expect(a.recordingTrace, isFalse);
+      expect(o.runProgress(runId)!.started, isFalse);
+      expect(o.runProgress('nope'), isNull);
+      expect(o.dogPath('nope'), isEmpty);
+      await expectLater(a.putRun(Run(track: t.id, dog: 'Max')), throwsA(isA<AuthorizationException>()));
+      await expectLater(o.startRun('nope'), throwsArgumentError);
+
+      await o.setRunSource(runId, aliceId.id);
+      await o.startRun(runId);
+      await eventually(() => a.recordingTrace && a.runs[runId]!.status == RunStatus.running);
+      await tick();
+      await walk(a, [for (var m = 0.0; m <= 200; m += 40) m]);
+      await eventually(() => o.trace(aliceId.id).length == 6, reason: 'alice path recorded');
+      expect(events[o]!.whereType<TraceUpdated>().map((e) => e.memberId), contains(aliceId.id));
+      await walk(b, [300]); // not the source: not recorded
+      expect(b.recordingTrace, isFalse);
+
+      // The official follower changes: bob shares the dog's position from now on.
+      await o.setRunSource(runId, bobId.id);
+      await eventually(() => b.recordingTrace && !a.recordingTrace);
+      await tick();
+      await walk(b, [for (var m = 240.0; m <= 400; m += 40) m]);
+      await walk(a, [550]); // no longer the source
+      await eventually(() => o.dogPath(runId).length == 11, reason: 'both sources, each over its period');
+      expect(o.trace(aliceId.id), hasLength(6));
+      final p = o.runProgress(runId)!;
+      expect(p.started, isTrue);
+      expect(p.progress, closeTo(400, 2));
+      expect(p.fraction, closeTo(400 / 600, 0.01));
+
+      await o.finishRun(runId);
+      await eventually(() => !b.recordingTrace);
+      expect(o.runs[runId]!.sources.map((s) => s.memberId), [aliceId.id, bobId.id]);
+      expect(events[a]!.whereType<RunUpdated>(), isNotEmpty);
+
+      // Someone joining later sees the same path, from the recordings.
+      final late = await join(o, aliceId, deviceId: 'tablet');
+      expect(late.dogPath(runId), hasLength(11));
+      expect(late.runProgress(runId)!.progress, closeTo(400, 2));
+
+      await o.deleteRun(runId);
+      await eventually(() => events[a]!.whereType<RunRemoved>().isNotEmpty && a.runs.isEmpty);
+    });
+
+    test('trace modes, buffered recording and flush on close', () async {
+      final o = await create();
+      final a = await join(o, aliceId, traceFlushInterval: const Duration(hours: 1));
+      await walk(a, [0]);
+      expect(a.recordingTrace, isFalse);
+      a.traceMode = TraceMode.always;
+      expect(a.recordingTrace, isTrue);
+      await walk(a, [10, 20]); // first one published at once, then buffered
+      await eventually(() => o.trace(aliceId.id).length == 1);
+      await a.flushTrace();
+      await eventually(() => o.trace(aliceId.id).length == 2);
+      await walk(a, [30]);
+      await a.publishPosition(Position(lat: 45.3, lon: 5.3, time: now(), accuracy: 500)); // too inaccurate
+      sessions.remove(a);
+      await a.close();
+      await eventually(() => o.trace(aliceId.id).length == 3, reason: 'flushed on close');
+      // A new session of the same device continues the segment of the hour.
+      final a2 = await join(o, aliceId);
+      a2.traceMode = TraceMode.always;
+      await walk(a2, [40]);
+      await eventually(() => o.trace(aliceId.id).length == 4);
+      expect(o.channel.items(PepCollections.trace), hasLength(1));
+      a2.traceMode = TraceMode.never;
+      await walk(a2, [50]);
+      await settle();
+      expect(o.trace(aliceId.id), hasLength(4));
+    });
+
+    test('the owner adds collections missing from older projects', () async {
+      final o = await create();
+      final old = {...o.channel.acl.collections}
+        ..remove(PepCollections.run)
+        ..remove(PepCollections.trace);
+      await o.channel.updateAcl(collections: old);
+      final a = await join(o, aliceId);
+      expect(a.channel.acl.collections.containsKey(PepCollections.run), isFalse);
+      await expectLater(a.ensureCollections(), throwsA(isA<AuthorizationException>()));
+      await join(o, ownerId, deviceId: 'laptop');
+      await eventually(() => a.channel.acl.collections.containsKey(PepCollections.run));
+      expect(a.channel.acl.collections[PepCollections.trace]!.writers, Writers.self);
+    });
+
+    test('bot members', () async {
+      final o = await create();
+      final bot = await join(o, bobId);
+      await bot.setMemberName('Tractive', bot: true);
+      await eventually(() => o.members[bobId.id]?.bot ?? false);
     });
 
     test('nothing readable on the broker', () async {

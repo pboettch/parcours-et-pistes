@@ -129,4 +129,27 @@ void main() {
       expect(p.end, 11);
     });
   });
+
+  test('TrailWalker walks along the track and is matched by TrailProgress', () {
+    final line = TrackLine([at(0), at(500), at(500, 500)]);
+    final w = TrailWalker(line, speed: 1, seed: 7);
+    expect(w.duration.inMilliseconds / 1000, closeTo(1000, 1));
+    expect(w.finishedAt(const Duration(seconds: 998)), isFalse);
+    expect(w.finishedAt(const Duration(seconds: 1001)), isTrue);
+    final walk = [
+      for (var s = 0; s <= 700; s += 10)
+        () {
+          final p = w.at(Duration(seconds: s));
+          return TimedPoint(p.lat, p.lon, t0.add(Duration(seconds: s)));
+        }(),
+    ];
+    for (final p in walk) {
+      expect(line.nearest(p.lat, p.lon).distance, lessThan(12 + 3 * 1.5 + 0.5));
+    }
+    expect(w.at(const Duration(hours: 1)).distanceTo(at(500, 500)), lessThan(16));
+    final progress = TrailProgress.match(line, walk);
+    expect(progress.progress, closeTo(700, 15));
+    // A walker on a single point stays around it.
+    expect(TrailWalker(TrackLine([at(0)]), wobble: 0, jitter: 0).at(const Duration(seconds: 5)).distanceTo(at(0)), 0);
+  });
 }
