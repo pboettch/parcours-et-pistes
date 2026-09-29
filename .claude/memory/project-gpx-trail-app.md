@@ -56,7 +56,15 @@ custom sections as `<extensions>` in namespace `urn:parcours-et-pistes:gpx:1` (p
 TrackDoc JSON wrapper carries only id/rev/upd/deleted + gpx. Concrete RU extension elements: TBD
 by the user.
 
-**Status (2026-09-29):** `packages/pep_core` phases 1–6 done and committed: 213 test runs green
+**Architecture split (user request, 2026-09-29):** three packages in a Dart workspace —
+`pep_channel` (secure channel over opaque items: envelope with signed header rev/time/deleted,
+owner-signed ACL declaring collections + writer policy owner/editors/self + optional TTL),
+`pep_content` (Gpx, Position, MemberProfile, ProjectInfo; no crypto/MQTT), `pep_core`
+(ProjectSession facade + PepCollections mapping: info/track/member/pos; CLI). User wants to add
+other content types later → new collection in PepCollections + type in pep_content; collections
+are declared in the ACL so older apps still enforce their rules.
+
+**Status (2026-09-29):** libraries done and committed (now split into pep_channel/pep_content/pep_core): 213 test runs green
 (VM + Chromium; memory broker + mosquitto TCP/TLS/WS/WSS/auth), ~96 % line coverage, `pep` CLI and
 `.claude/scripts/e2e.sh` pass. **Next: Flutter apps** (user wants to start them once the library is
 done). Open topics for later: RU-specific track info (user will detail), default production broker

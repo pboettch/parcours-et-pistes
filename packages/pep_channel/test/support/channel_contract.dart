@@ -351,6 +351,9 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       expect(() => a.put('profile', aliceId.id, b('x')), throwsStateError);
       await expectLater(a.unlock('pw-1'), throwsA(isA<WrongPasswordException>()));
       await a.unlock('pw-2');
+      expect(a.item('profile', aliceId.id), isNull, reason: 'cleared while alice was locked');
+      expect(a.items('pos'), isEmpty);
+      await eventually(() => a.item('note', 'by-alice')?.signerId == ownerId.id);
 
       final bob = await join(o, bobId, password: 'pw-2');
       expect(events[bob]!.whereType<MessageRejected>(), isEmpty, reason: 'nothing left under the old key');

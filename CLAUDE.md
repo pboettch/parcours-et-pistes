@@ -5,8 +5,14 @@ Free, open-source (MIT) iOS / Android / web app to share trails of search-dog di
 end-to-end encrypted over an MQTT broker; there is no central user database.
 
 ## Repository layout
-- `packages/pep_core/` — pure Dart shared library (crypto, envelope, models, GPX, topics,
-  transport, high-level `ProjectSession`). Built and fully tested before any app work.
+- Dart workspace (root `pubspec.yaml`) with three pure Dart packages:
+  - `packages/pep_channel/` — secure channel (transport, crypto, envelope, ACL, `SecureChannel`);
+    never interprets item bodies.
+  - `packages/pep_content/` — content model (GPX + pep extensions, Position, MemberProfile,
+    ProjectInfo); no crypto, no MQTT.
+  - `packages/pep_core/` — `ProjectSession` facade mapping content onto collections
+    (`PepCollections`), the apps' API; `pep` CLI.
+  New content type = data type in pep_content + collection in PepCollections.
 - `apps/` — Flutter apps (later).
 - `tools/broker/` — development MQTT 5 broker setup.
 - `docs/DESIGN.md` — architecture, crypto, topic layout, phases.
@@ -24,6 +30,6 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
 ## Dev commands
 - `source .claude/scripts/env.sh` — Flutter/Dart SDK on PATH (user-local in `/home/pmp/devel/flutter`).
 - `.claude/scripts/broker.sh start|stop|status` — local mosquitto (MQTT 18883, WS 18080).
-- `.claude/scripts/test.sh [args]` — `dart test` on VM + Chromium (`-x broker` skips broker tests).
+- `.claude/scripts/test.sh [-P pkg]... [args]` — `dart test` on VM + Chromium for all/given packages (`-x broker` skips broker tests).
 - `.claude/scripts/e2e.sh` — end-to-end CLI scenario (owner + participant) on the dev broker.
 - `dart run pep_core:pep --help` (in `packages/pep_core`) — CLI for manual testing.

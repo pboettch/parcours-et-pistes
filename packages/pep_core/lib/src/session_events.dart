@@ -1,27 +1,24 @@
-import '../errors.dart';
-import '../model/member.dart';
-import '../model/position.dart';
-import '../model/project_doc.dart';
-import '../model/track_doc.dart';
+import 'package:pep_content/pep_content.dart';
+
+import 'project.dart';
+import 'track.dart';
 
 /// Changes observed by a `ProjectSession`.
 sealed class SessionEvent {
   const SessionEvent();
 }
 
+/// Project information, editors or settings changed.
 class ProjectUpdated extends SessionEvent {
   const ProjectUpdated(this.project);
 
-  final ProjectDoc project;
+  final Project project;
 }
 
 class TrackUpdated extends SessionEvent {
-  const TrackUpdated(this.track, {required this.signerId});
+  const TrackUpdated(this.track);
 
-  final TrackDoc track;
-
-  /// Member who published this revision (owner or editor).
-  final String signerId;
+  final Track track;
 }
 
 class TrackRemoved extends SessionEvent {
@@ -31,10 +28,10 @@ class TrackRemoved extends SessionEvent {
 }
 
 class MemberUpdated extends SessionEvent {
-  const MemberUpdated(this.memberId, this.member);
+  const MemberUpdated(this.memberId, this.profile);
 
   final String memberId;
-  final MemberDoc member;
+  final MemberProfile profile;
 }
 
 class MemberRemoved extends SessionEvent {
@@ -63,17 +60,18 @@ class PasswordChanged extends SessionEvent {
   const PasswordChanged();
 }
 
-/// The project was deleted by its owner (meta and project doc cleared).
+/// The project was deleted by its owner.
 class ProjectDeleted extends SessionEvent {
   const ProjectDeleted();
 }
 
-/// A message could not be decrypted, verified or authorized and was ignored.
+/// A message was ignored: not decryptable, not verifiable, not authorized
+/// (`PepException`) or with invalid content (`ContentFormatException`).
 class MessageRejected extends SessionEvent {
   const MessageRejected(this.topic, this.error);
 
   final String topic;
-  final PepException error;
+  final Exception error;
 
   @override
   String toString() => 'MessageRejected($topic, $error)';

@@ -1,8 +1,10 @@
 # pep_core
 
-Shared low-level library of **Parcours et Pistes**: end-to-end encrypted sharing of search-dog
-trails (GPX) and live positions over MQTT 5. Pure Dart — runs on the Dart VM, in Flutter apps
-(iOS, Android, desktop) and in browsers.
+Project sessions of **Parcours et Pistes** — the one package the apps import. `ProjectSession`
+maps the content model ([`pep_content`](../pep_content)) onto the secure channel
+([`pep_channel`](../pep_channel)): end-to-end encrypted sharing of search-dog trails (GPX) and
+live positions over MQTT 5. Pure Dart — Dart VM, Flutter (iOS, Android, desktop) and browsers.
+It also re-exports both packages and contains the `pep` CLI.
 
 Protocol and security design: [`docs/DESIGN.md`](../../docs/DESIGN.md).
 A runnable version of the example below: [`example/example.dart`](example/example.dart).
@@ -47,7 +49,8 @@ final objects = session.tracks.values.first.document.objects;   // RU objects = 
 Main API: `ProjectSession` (`create`, `join`, `publishTrack`, `deleteTrack`, `addEditor`,
 `removeEditor`, `updateProject`, `publishPosition`, `clearPosition`, `setMemberName`,
 `changePassword`, `unlock`, `sync`, `deleteProject`, `close`; state getters `project`, `tracks`,
-`members`, `positions`; `events` stream), `Gpx`, `JoinLink`, `Transport`.
+`members`, `positions`; `events` stream; `channel` for low-level access), `Gpx`, `JoinLink`,
+`Transport`. Content ↔ collection mapping: `PepCollections`.
 
 ### Web
 Browsers need the sumo build of `sodium.js`: `dart run sodium:update_web --sumo` (Flutter web:
@@ -59,12 +62,11 @@ From the repository root:
 ```bash
 source .claude/scripts/env.sh          # user-local Flutter/Dart SDK
 .claude/scripts/broker.sh start        # local mosquitto: mqtt :18883, ws :18080, mqtts :18884, wss :18443, auth :18885
-.claude/scripts/test.sh                # all tests on the VM and in Chromium
+.claude/scripts/test.sh                # all packages, VM and Chromium
+.claude/scripts/test.sh -P pep_channel # one package
 .claude/scripts/test.sh -x broker      # without the broker integration tests
 .claude/scripts/e2e.sh                 # end-to-end scenario with the CLI
 ```
 
 CLI for manual testing: `dart run pep_core:pep --help`.
 
-Status: 213 test runs (VM + Chromium; memory broker and mosquitto over TCP, TLS, WS, WSS),
-~96 % line coverage (`dart test --coverage=coverage`, then `coverage:format_coverage`).

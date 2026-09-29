@@ -197,6 +197,9 @@ class SecureChannel {
   JoinLink get joinLink =>
       JoinLink(channelId: channelId, ownerId: ownerId, broker: linkBroker, topicBase: topics.base);
 
+  /// A new random item id (16 chars, topic-safe).
+  String generateItemId() => newItemId(_c);
+
   /// Whether this member may currently publish item [id] of [collection].
   bool canWrite(String collection, String id) => !locked && _acl != null && acl.canWrite(_me.id, collection, id);
 
@@ -462,10 +465,12 @@ class SecureChannel {
       switch (ref.kind) {
         case TopicKind.meta:
           _onMeta(topic, payload);
+        // Removals need no key: apply them even while locked, otherwise an
+        // item cleared during a password change would survive the unlock.
         case TopicKind.acl:
-          if (!locked) _onAcl(topic, payload);
+          if (!locked || payload.isEmpty) _onAcl(topic, payload);
         case TopicKind.item:
-          if (!locked) _onItem(ref.collection!, ref.id!, topic, payload);
+          if (!locked || payload.isEmpty) _onItem(ref.collection!, ref.id!, topic, payload);
         case TopicKind.sync:
           break;
       }
