@@ -120,6 +120,9 @@ class ProjectSession {
     );
     try {
       await s._start();
+      // After the barrier, all retained messages of the project have arrived,
+      // so the session starts with the complete state (tracks included).
+      await s.sync(timeout: timeout);
       await s._metaArrived.future.timeout(timeout,
           onTimeout: () => throw const ProjectNotFoundException('no project metadata on the broker'));
       await s.unlock(password);
@@ -166,12 +169,16 @@ class ProjectSession {
   /// project document (editor list) changes.
   final _pendingAuth = <String>{};
 
+  final _syncWaiters = <String, Completer<void>>{};
   final _metaArrived = Completer<void>();
   final _projectArrived = Completer<void>();
   final _events = StreamController<SessionEvent>.broadcast();
   StreamSubscription<TransportMessage>? _sub;
   Timer? _pruneTimer;
   var _closed = false;
+
+  /// Whether this session shared a position that it has not cleared yet.
+  var _sharingPosition = false;
 
   // ---------------------------------------------------------------- state
 
@@ -271,10 +278,14 @@ class ProjectSession {
   Future<void> publishPosition(Position position) async {
     _requireUnlocked();
     await _publishSealed(topics.position(_me.id), position.encode(), expiry: project.settings.positionTtl);
+    _sharingPosition = true;
   }
 
   /// Stops sharing this device's position.
-  Future<void> clearPosition() => _publishRaw(topics.position(_me.id), Uint8List(0));
+  Future<void> clearPosition() async {
+    await _publishRaw(topics.position(_me.id), Uint8List(0));
+    _sharingPosition = false;
+  }
 
   /// Publishes this member's display name.
   Future<void> setMemberName(String name) async {
@@ -284,11 +295,11 @@ class ProjectSession {
 
   /// Owner only: changes the project password.
   ///
-  /// Re-encrypts the project document, all tracks (re-signed by the owner) and
-  /// tombstones, and the owner's own profile under the new key; clears other
-  /// members' profiles and positions (they re-publish after unlocking); then
-  /// publishes the new metadata, which locks every other session until
-  /// [unlock] is called with the new password.
+  /// Publishes the new metadata first, which locks every other session until
+  /// [unlock] is called with the new password; then re-encrypts the project
+  /// document, all tracks (re-signed by the owner) and tombstones, and the
+  /// owner's own profile under the new key, and clears other members'
+  /// profiles and positions (they re-publish after unlocking).
   Future<void> changePassword(String newPassword, {KdfParams? kdf}) async {
     _requireOwner();
     final params = kdf ?? KdfParams.generate(_c);
@@ -307,8 +318,10 @@ class ProjectSession {
           t
     ];
 
+    final meta = ProjectMeta(kdf: params, keyCheck: newKey.check, rev: _meta!.rev + 1);
     _key = newKey;
     oldKey.dispose();
+    await _publishMeta(meta);
     await _publishProject(project.next(now: _now()));
     for (final t in tracks) {
       await _publishSealed(
@@ -332,7 +345,6 @@ class ProjectSession {
     for (final t in others) {
       await _publishRaw(t, Uint8List(0));
     }
-    await _publishMeta(ProjectMeta(kdf: params, keyCheck: newKey.check, rev: _meta!.rev + 1));
   }
 
   /// Derives the key from [password] and (re)loads all content. Used after
@@ -349,6 +361,24 @@ class ProjectSession {
     _reprocessAll();
   }
 
+  /// Waits until every message the broker had queued for this session before
+  /// the call has been received — in particular all retained messages after
+  /// (re)subscribing.
+  ///
+  /// Implemented as a barrier: an empty, non-retained probe is published to a
+  /// random `sync/<nonce>` topic of the project; the broker delivers it behind
+  /// the messages already queued for this subscription.
+  Future<void> sync({Duration timeout = const Duration(seconds: 10)}) async {
+    final topic = topics.sync(b64u(_c.randomBytes(9)));
+    final done = _syncWaiters[topic] = Completer<void>();
+    try {
+      await _transport.publish(topic, Uint8List(0));
+      await done.future.timeout(timeout, onTimeout: () => throw TransportException('sync timed out'));
+    } finally {
+      _syncWaiters.remove(topic);
+    }
+  }
+
   /// Owner only: removes every retained message of the project from the
   /// broker, then closes the session.
   Future<void> deleteProject() async {
@@ -361,10 +391,12 @@ class ProjectSession {
     await close(clearPosition: false);
   }
 
-  /// Stops syncing. By default also clears this device's shared position.
+  /// Stops syncing. By default also clears the position shared by this
+  /// session (a position shared by another session of the same identity, e.g.
+  /// a background service, is left alone).
   Future<void> close({bool clearPosition = true}) async {
     if (_closed) return;
-    if (clearPosition && _positions.containsKey(_me.id) && _transport.state == TransportState.connected) {
+    if (clearPosition && _sharingPosition && _transport.state == TransportState.connected) {
       await _transport.publish(topics.position(_me.id), Uint8List(0), retain: true);
     }
     _closed = true;
@@ -434,6 +466,8 @@ class ProjectSession {
 
   void _onMessage(String topic, Uint8List payload) {
     if (_closed) return;
+    final waiter = _syncWaiters[topic];
+    if (waiter != null) return waiter.complete();
     final ref = topics.parse(topic);
     if (ref == null) return;
     final prev = _raw[topic];

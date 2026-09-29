@@ -30,6 +30,7 @@ class TopicRef {
 /// <base>/<uuid>/track/<id>       owner- or editor-signed track (or tombstone)
 /// <base>/<uuid>/member/<id>      member profile, signed by that member
 /// <base>/<uuid>/pos/<id>         live position, signed by that member, expires
+/// <base>/<uuid>/sync/<nonce>     empty non-retained barrier probes
 /// ```
 class ProjectTopics {
   ProjectTopics(String projectId, {this.base = defaultBase})
@@ -54,6 +55,9 @@ class ProjectTopics {
   String track(String id) => '$_root/track/${checkTopicId(id)}';
   String member(String id) => '$_root/member/${checkTopicId(id)}';
   String position(String id) => '$_root/pos/${checkTopicId(id)}';
+
+  /// Barrier probe topic (empty, non-retained messages; see `ProjectSession.sync`).
+  String sync(String nonce) => '$_root/sync/${checkTopicId(nonce)}';
 
   /// Returns null for topics outside this project or with an unknown layout.
   TopicRef? parse(String topic) {

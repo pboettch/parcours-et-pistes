@@ -66,6 +66,14 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
 
     tearDown(() async {
       for (final s in sessions) {
+        // Leave nothing behind on real brokers.
+        if (s.isOwner && !s.locked) {
+          try {
+            await s.deleteProject();
+          } on StateError {
+            // already closed
+          }
+        }
         await s.close();
       }
       sessions.clear();
@@ -141,7 +149,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       expect(a.isOwner, isFalse);
       expect(a.canEditTracks, isFalse);
       expect(a.project.name, 'Forêt de Chambaran');
-      await eventually(() => a.tracks.containsKey(t1.id), reason: 'track 1 at alice');
+      expect(a.tracks.containsKey(t1.id), isTrue, reason: 'join returns with all retained tracks');
       expect(a.tracks[t1.id]!.gpx, gpxA);
       expect(a.tracks[t1.id]!.name, 'Trail 1');
       expect(a.trackSigner(t1.id), ownerId.id);
@@ -371,6 +379,38 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       sessions.remove(a);
       await a.close();
       await eventually(() => !o.positions.containsKey(aliceId.id));
+    });
+
+    test('password change right after join re-seals every track (short-lived owner session)', () async {
+      final o = await create();
+      final ids = [for (var i = 0; i < 5; i++) (await o.publishTrack(gpx: gpxA, name: 't$i')).id];
+      // A fresh owner session (e.g. CLI, second device) must see all tracks
+      // before changing the password, or some would stay under the old key.
+      final o2 = await join(o, ownerId);
+      await o2.changePassword('pw-2', kdf: fastKdf(c));
+      final b = await join(o, bobId, password: 'pw-2');
+      expect(b.tracks.keys, unorderedEquals(ids));
+      expect(events[b]!.whereType<MessageRejected>(), isEmpty);
+    });
+
+    test('sync() barrier completes', () async {
+      final o = await create();
+      await o.sync();
+      final a = await join(o, aliceId);
+      await a.sync();
+    });
+
+    test('close only clears a position shared by this session', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      await a.publishPosition(Position(lat: 1, lon: 2, time: (h.clock ?? DateTime.now)()));
+      // Second session of the same identity (e.g. app UI vs background service).
+      final a2 = await join(o, aliceId);
+      await eventually(() => a2.positions.containsKey(aliceId.id) && o.positions.containsKey(aliceId.id));
+      sessions.remove(a2);
+      await a2.close();
+      await settle();
+      expect(o.positions.containsKey(aliceId.id), isTrue);
     });
 
     test('nothing but meta is readable on the broker', () async {
