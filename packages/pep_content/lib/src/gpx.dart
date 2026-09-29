@@ -1,6 +1,7 @@
 import 'package:xml/xml.dart';
 
 import 'errors.dart';
+import 'geo.dart';
 
 /// GPX 1.1 namespace.
 const gpxNamespace = 'http://www.topografix.com/GPX/1/1';
@@ -33,14 +34,9 @@ extension GpxExtensionAccess on List<XmlElement> {
 }
 
 /// A GPX point (track point, route point or waypoint).
-class GpxPoint {
-  GpxPoint(this.lat, this.lon, {this.ele, this.time, this.extensions = const []}) {
-    if (!(lat >= -90 && lat <= 90) || !(lon >= -180 && lon <= 180)) {
-      throw ContentFormatException('GPX coordinates out of range: $lat, $lon');
-    }
-  }
+class GpxPoint extends GeoPoint {
+  GpxPoint(super.lat, super.lon, {this.ele, this.time, this.extensions = const []});
 
-  final double lat, lon;
   final double? ele;
   final DateTime? time;
 
