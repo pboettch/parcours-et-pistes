@@ -1,24 +1,24 @@
 name: pep_core
 description: >-
-  Shared low-level library of Parcours et Pistes: end-to-end encrypted sharing of
-  search-dog trails (GPX) and live positions over MQTT.
+  Parcours et Pistes project sessions: maps the content model (pep_content)
+  onto the secure channel (pep_channel). Entry point for the apps; includes
+  the pep CLI.
 version: 0.1.0
 publish_to: none
+resolution: workspace
 
 environment:
   sdk: ^3.9.0
+
 dependencies:
-  archive: ^4.3.0
   args: ^2.7.0
-  crypto: ^3.0.7
-  meta: ^1.19.0
-  mqtt5_client: ^5.0.0
-  sodium: ^4.1.1+1
-  typed_data: ^1.4.0
-  uuid: ^4.6.0
-  xml: ^7.1.0
+  pep_channel:
+    path: ../pep_channel
+  pep_content:
+    path: ../pep_content
+
 dev_dependencies:
-  coverage: ^1.15.1
+  coverage: ^1.15.0
   lints: ^6.1.0
   test: ^1.32.0
 

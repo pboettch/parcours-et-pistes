@@ -97,7 +97,7 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
         description: cmd.option('description'),
         discipline: Discipline.parse(cmd.option('discipline')!),
         password: password,
-        settings: ProjectSettings(positionTtl: Duration(seconds: int.parse(cmd.option('ttl')!))),
+        positionTtl: Duration(seconds: int.parse(cmd.option('ttl')!)),
         linkBroker: cmd.option('link-broker'),
       );
       for (final f in cmd.multiOption('gpx')) {
@@ -140,7 +140,7 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
     case 'export':
       final out = Directory(cmd.option('out')!)..createSync(recursive: true);
       for (final t in s.tracks.values) {
-        final f = File('${out.path}/${_safe(t.name ?? t.id)}-${t.id}.gpx')..writeAsStringSync(t.gpx!);
+        final f = File('${out.path}/${_safe(t.name ?? t.id)}-${t.id}.gpx')..writeAsStringSync(t.gpx);
         print(f.path);
       }
     case 'pos':
@@ -180,13 +180,13 @@ Future<void> _watch(ProjectSession s) async {
     switch (e) {
       case ProjectUpdated(:final project):
         print('$t project rev ${project.rev}: ${project.name}, editors ${project.editors.length}');
-      case TrackUpdated(:final track, :final signerId):
-        print('$t track ${track.id} rev ${track.rev} "${track.name ?? ''}" by ${_who(s, signerId)}'
-            ' (${_gpxSummary(track.gpx!)})');
+      case TrackUpdated(:final track):
+        print('$t track ${track.id} rev ${track.rev} "${track.name ?? ''}" by ${_who(s, track.signerId)}'
+            ' (${_gpxSummary(track.gpx)})');
       case TrackRemoved(:final trackId):
         print('$t track $trackId removed');
-      case MemberUpdated(:final memberId, :final member):
-        print('$t member ${_short(memberId)} = ${member.name}');
+      case MemberUpdated(:final memberId, :final profile):
+        print('$t member ${_short(memberId)} = ${profile.name}');
       case MemberRemoved(:final memberId):
         print('$t member ${_short(memberId)} removed');
       case PositionUpdated(:final memberId, :final position):
@@ -201,7 +201,7 @@ Future<void> _watch(ProjectSession s) async {
         print('$t project deleted');
         stop();
       case MessageRejected(:final topic, :final error):
-        print('$t REJECTED $topic: ${error.message}');
+        print('$t REJECTED $topic: $error');
     }
   });
   await done.future;
@@ -214,12 +214,12 @@ void _printInfo(ProjectSession s) {
   if (p.description != null) print('         ${p.description}');
   print('owner    ${_short(p.ownerId)}${s.isOwner ? ' (me)' : ''}');
   print('editors  ${p.editors.map(_short).join(', ')}');
-  print('pos ttl  ${p.settings.positionTtl.inSeconds}s');
+  print('pos ttl  ${p.positionTtl.inSeconds}s');
 }
 
 void _printTracks(ProjectSession s) {
   for (final t in s.tracks.values) {
-    print('track    ${t.id} rev ${t.rev} "${t.name ?? ''}" (${_gpxSummary(t.gpx!)})');
+    print('track    ${t.id} rev ${t.rev} "${t.name ?? ''}" (${_gpxSummary(t.gpx)})');
   }
 }
 

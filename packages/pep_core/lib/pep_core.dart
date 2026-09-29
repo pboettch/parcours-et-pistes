@@ -1,27 +1,18 @@
-/// Shared low-level library of Parcours et Pistes: end-to-end encrypted sharing
-/// of search-dog trails (GPX) and live positions over MQTT.
+/// Parcours et Pistes project sessions: the content model (`pep_content`)
+/// mapped onto the secure channel (`pep_channel`). The one import apps need.
 library;
 
-// GPX custom sections are exposed as XmlElement (package:xml).
-export 'package:xml/xml.dart';
+import 'package:pep_channel/pep_channel.dart' show ChannelNotFoundException;
 
-export 'src/codec/bytes.dart' show b64u, unb64u, utf8Bytes;
-export 'src/crypto/envelope.dart';
-export 'src/crypto/identity.dart';
-export 'src/crypto/kdf.dart';
-export 'src/crypto/pep_crypto.dart';
-export 'src/errors.dart';
-export 'src/model/gpx.dart';
-export 'src/model/member.dart';
-export 'src/model/meta.dart';
-export 'src/model/position.dart';
-export 'src/model/project_doc.dart';
-export 'src/model/track_doc.dart';
-export 'src/protocol/ids.dart' show newUuid, newTrackId, isProjectId, isTopicId;
-export 'src/protocol/join_link.dart';
-export 'src/protocol/topics.dart';
-export 'src/transport/memory_transport.dart';
-export 'src/transport/mqtt5_transport.dart';
-export 'src/transport/transport.dart';
-export 'src/session/project_session.dart';
-export 'src/session/session_events.dart';
+export 'package:pep_channel/pep_channel.dart'
+    hide ChannelEvent, AclUpdated, ItemUpdated, ItemRemoved, PasswordChanged, ChannelDeleted, MessageRejected;
+export 'package:pep_content/pep_content.dart' hide utf8Bytes;
+
+export 'src/collections.dart';
+export 'src/project.dart';
+export 'src/project_session.dart';
+export 'src/session_events.dart';
+export 'src/track.dart';
+
+/// Alias used by the apps: a project is a channel.
+typedef ProjectNotFoundException = ChannelNotFoundException;

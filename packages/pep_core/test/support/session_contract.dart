@@ -5,26 +5,15 @@ import 'dart:typed_data';
 import 'package:pep_core/pep_core.dart';
 import 'package:test/test.dart';
 
-import 'crypto.dart';
-
 /// Environment for session tests: transports on one broker, optional fake clock.
 abstract class SessionHarness {
   Transport transport();
-
-  /// Fake clock shared by sessions, or null when using real time.
   DateTime Function()? get clock;
-
-  /// Advances the fake clock (only when [clock] != null).
   void advance(Duration d);
-
-  /// Retained payloads on the broker, when observable (memory broker only).
   Map<String, Uint8List>? get retained;
-
-  /// All payloads ever published, when observable (memory broker only).
   List<(String, Uint8List)>? get log;
 }
 
-/// Polls [cond] until true (works for in-memory and real brokers alike).
 Future<void> eventually(bool Function() cond,
     {Duration timeout = const Duration(seconds: 5), String? reason}) async {
   final deadline = DateTime.now().add(timeout);
@@ -34,12 +23,16 @@ Future<void> eventually(bool Function() cond,
   }
 }
 
-/// Lets in-flight messages arrive (to assert that something did NOT happen).
 Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 300));
 
+PepCrypto? _crypto;
+Future<PepCrypto> testCrypto() async => _crypto ??= await PepCrypto.init();
+KdfParams fastKdf(PepCrypto c) => KdfParams.generate(c, opsLimit: KdfParams.minOps, memLimit: KdfParams.minMem);
+
 const gpxA = '''<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="t" xmlns="http://www.topografix.com/GPX/1/1">
-  <wpt lat="45.2001" lon="5.3002"><name>Objet 1</name><type>pep:object</type></wpt>
+<gpx version="1.1" creator="t" xmlns="http://www.topografix.com/GPX/1/1" xmlns:pep="urn:parcours-et-pistes:gpx:1">
+  <wpt lat="45.2001" lon="5.3002"><name>Objet 1</name><type>pep:object</type>
+    <extensions><pep:object material="cuir"/></extensions></wpt>
   <trk><name>Secret forest trail</name><trkseg>
     <trkpt lat="45.2000" lon="5.3000"/><trkpt lat="45.2005" lon="5.3005"/>
   </trkseg></trk>
@@ -70,7 +63,6 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
 
     tearDown(() async {
       for (final s in sessions) {
-        // Leave nothing behind on real brokers.
         if (s.isOwner && !s.locked) {
           try {
             await s.deleteProject();
@@ -91,7 +83,8 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       return s;
     }
 
-    Future<ProjectSession> create({String password = 'pw-1', Duration? ttl}) async => track(await ProjectSession.create(
+    Future<ProjectSession> create({String password = 'pw-1', Duration ttl = const Duration(minutes: 10)}) async =>
+        track(await ProjectSession.create(
           crypto: c,
           transport: h.transport(),
           identity: ownerId,
@@ -99,7 +92,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
           description: 'Entraînement du samedi',
           discipline: Discipline.ru,
           password: password,
-          settings: ProjectSettings(positionTtl: ttl ?? const Duration(minutes: 10)),
+          positionTtl: ttl,
           kdf: fastKdf(c),
           clock: h.clock,
           pruneInterval: const Duration(hours: 1),
@@ -118,53 +111,45 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
           pruneInterval: const Duration(hours: 1),
         ));
 
-    /// A password holder forging messages with arbitrary identities.
-    Future<(Transport, Envelope, ProjectKey)> attacker(ProjectSession owner, String password) async {
-      final t = h.transport();
-      await t.connect();
-      final got = Completer<Uint8List>();
-      final sub = t.messages.listen((m) {
-        if (m.topic == owner.topics.meta && !got.isCompleted) got.complete(m.payload);
-      });
-      await t.subscribe(owner.topics.meta);
-      final meta = ProjectMeta.open(c,
-          topic: owner.topics.meta, data: await got.future, ownerKey: publicKeyFromId(owner.ownerId));
-      await sub.cancel();
-      await t.unsubscribe(owner.topics.meta);
-      return (t, Envelope(c), ProjectKey.derive(c, password, meta.kdf));
-    }
+    DateTime now() => (h.clock ?? DateTime.now)().toUtc();
 
-    test('create: owner state and join link', () async {
+    test('create and join: project, owner, link', () async {
       final o = await create();
       expect(o.isOwner, isTrue);
       expect(o.canEditTracks, isTrue);
       expect(o.project.name, 'Forêt de Chambaran');
+      expect(o.project.description, 'Entraînement du samedi');
       expect(o.project.discipline, Discipline.ru);
-      expect(o.project.rev, 1);
-      final link = JoinLink.parse(o.joinLink.toUri());
-      expect(link.projectId, o.projectId);
-      expect(link.ownerId, ownerId.id);
-    });
-
-    test('join sees project and tracks published before and after joining', () async {
-      final o = await create();
-      final t1 = await o.publishTrack(gpx: named(gpxA, 'Trail 1'));
+      expect(o.project.ownerId, ownerId.id);
+      expect(o.project.positionTtl, const Duration(minutes: 10));
+      expect(o.channel.acl.collections.keys, unorderedEquals(PepCollections.defaults().keys));
       final a = await join(o, aliceId);
       expect(a.isOwner, isFalse);
       expect(a.canEditTracks, isFalse);
       expect(a.project.name, 'Forêt de Chambaran');
-      expect(a.tracks.containsKey(t1.id), isTrue, reason: 'join returns with all retained tracks');
-      expect(a.tracks[t1.id]!.gpx, named(gpxA, 'Trail 1'), reason: 'GPX transported byte for byte');
-      expect(a.tracks[t1.id]!.name, 'Trail 1');
-      expect(a.trackSigner(t1.id), ownerId.id);
-      expect(a.tracks[t1.id]!.document.objects, hasLength(1));
+      expect(a.projectId, o.projectId);
+    });
 
-      final t2 = await o.publishTrack(gpx: named(gpxB, 'Trail 2'));
-      await eventually(() => a.tracks.containsKey(t2.id), reason: 'track 2 at alice');
+    test('tracks: GPX content, objects and custom sections travel intact', () async {
+      final o = await create();
+      final t1 = await o.publishTrack(gpx: named(gpxA, 'Trail 1'));
+      expect(t1.name, 'Trail 1');
+      final a = await join(o, aliceId);
+      final t = a.tracks[t1.id]!;
+      expect(t.gpx, named(gpxA, 'Trail 1'), reason: 'byte for byte');
+      expect(t.name, 'Trail 1');
+      expect(t.signerId, ownerId.id);
+      final obj = t.document.objects.single;
+      expect(obj.name, 'Objet 1');
+      expect(obj.extensions.pep('object')!.getAttribute('material'), 'cuir');
+
+      final t2 = await o.publishTrack(gpx: gpxB);
+      await eventually(() => a.tracks.containsKey(t2.id));
+      expect(a.tracks[t2.id]!.name, 'Secret forest trail', reason: 'fallback to the <trk> name');
       expect(events[a]!.whereType<TrackUpdated>().map((e) => e.track.id), contains(t2.id));
     });
 
-    test('track update and delete propagate; stale revisions are ignored', () async {
+    test('track update and delete', () async {
       final o = await create();
       final a = await join(o, aliceId);
       final t = await o.publishTrack(gpx: named(gpxA, 'v1'));
@@ -172,109 +157,39 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       await o.publishTrack(id: t.id, gpx: named(gpxB, 'v2'));
       await eventually(() => a.tracks[t.id]?.name == 'v2');
       expect(a.tracks[t.id]!.rev, 2);
-
       await o.deleteTrack(t.id);
-      await eventually(() => !a.tracks.containsKey(t.id), reason: 'delete at alice');
-      expect(o.tracks, isEmpty);
+      await eventually(() => !a.tracks.containsKey(t.id));
       expect(events[a]!.whereType<TrackRemoved>().single.trackId, t.id);
-
-      final b = await join(o, bobId);
-      await settle();
-      expect(b.tracks, isEmpty, reason: 'tombstone hides the track from new joiners');
+      expect((await join(o, bobId)).tracks, isEmpty);
     });
 
-    test('wrong password, unknown project, wrong owner in link', () async {
+    test('invalid GPX: refused on publish, rejected on receipt', () async {
       final o = await create();
-      await expectLater(join(o, aliceId, password: 'nope'), throwsA(isA<WrongPasswordException>()));
-      final ghost = JoinLink(projectId: newUuid(c), ownerId: ownerId.id);
-      await expectLater(join(o, aliceId, link: ghost, timeout: const Duration(milliseconds: 500)),
-          throwsA(isA<ProjectNotFoundException>()));
-      final fakeOwner = JoinLink(projectId: o.projectId, ownerId: bobId.id);
-      await expectLater(join(o, aliceId, link: fakeOwner, timeout: const Duration(milliseconds: 500)),
-          throwsA(isA<ProjectNotFoundException>()));
+      await expectLater(o.publishTrack(gpx: 'not gpx'), throwsA(isA<ContentFormatException>()));
+      final a = await join(o, aliceId);
+      // An editor's app with a bug publishes a validly signed but broken track.
+      await o.channel.put(PepCollections.track, 'broken', utf8Bytes('<kml/>'));
+      await eventually(() => events[a]!.whereType<MessageRejected>().isNotEmpty);
+      expect(events[a]!.whereType<MessageRejected>().single.error, isA<ContentFormatException>());
+      expect(a.tracks, isEmpty);
+      expect(o.tracks, isEmpty);
     });
 
-    test('participants cannot edit tracks or the project', () async {
+    test('permissions and delegation', () async {
       final o = await create();
       final a = await join(o, aliceId);
+      final b = await join(o, bobId);
       await expectLater(a.publishTrack(gpx: gpxA), throwsA(isA<AuthorizationException>()));
       await expectLater(a.updateProject(name: 'x'), throwsA(isA<AuthorizationException>()));
       await expectLater(a.addEditor(aliceId.id), throwsA(isA<AuthorizationException>()));
-      await expectLater(a.changePassword('x'), throwsA(isA<AuthorizationException>()));
-      await expectLater(o.publishTrack(gpx: 'not gpx'), throwsA(isA<FormatPepException>()));
-    });
-
-    test('forged tracks and project docs from a password holder are rejected', () async {
-      final o = await create();
-      final a = await join(o, aliceId);
-      final (t, env, key) = await attacker(o, 'pw-1');
-      final forged = TrackDoc(id: 'evil', rev: 1, updated: DateTime.now().toUtc(), gpx: gpxA);
-      await t.publish(o.topics.track('evil'),
-          env.seal(key: key.dataKey, topic: o.topics.track('evil'), body: forged.encode(), signer: bobId),
-          retain: true);
-      final fakeDoc = o.project.next(editors: {bobId.id});
-      await t.publish(o.topics.project,
-          env.seal(key: key.dataKey, topic: o.topics.project, body: fakeDoc.encode(), signer: bobId),
-          retain: true);
-      await eventually(() => events[a]!.whereType<MessageRejected>().length >= 2, reason: 'rejections');
-      expect(a.tracks, isEmpty);
-      expect(o.tracks, isEmpty);
-      expect(a.project.editors, isEmpty);
-      expect(events[a]!.whereType<MessageRejected>().map((e) => e.error), everyElement(isA<AuthorizationException>()));
-      await t.disconnect();
-    });
-
-    test('delegation: editors publish tracks until removed', () async {
-      final o = await create();
-      final a = await join(o, aliceId);
-      final b = await join(o, bobId);
       await o.addEditor(aliceId.id);
-      await eventually(() => a.canEditTracks, reason: 'alice becomes editor');
+      await eventually(() => a.canEditTracks);
+      await eventually(() => events[a]!.whereType<ProjectUpdated>().any((e) => e.project.editors.contains(aliceId.id)));
       final t = await a.publishTrack(gpx: named(gpxA, 'by alice'));
-      await eventually(() => b.tracks.containsKey(t.id) && o.tracks.containsKey(t.id));
-      expect(b.trackSigner(t.id), aliceId.id);
-
+      await eventually(() => b.tracks[t.id]?.signerId == aliceId.id);
       await o.removeEditor(aliceId.id);
-      await eventually(() => !a.canEditTracks, reason: 'alice loses editor rights');
+      await eventually(() => !a.canEditTracks);
       await expectLater(a.publishTrack(gpx: gpxB), throwsA(isA<AuthorizationException>()));
-      expect(b.tracks.containsKey(t.id), isTrue, reason: 'earlier tracks stay');
-    });
-
-    test('track from a not-yet-editor is accepted once the owner adds them', () async {
-      final o = await create();
-      final b = await join(o, bobId);
-      final (t, env, key) = await attacker(o, 'pw-1');
-      final early = TrackDoc(id: 'early', rev: 1, updated: DateTime.now().toUtc(), gpx: gpxA);
-      await t.publish(o.topics.track('early'),
-          env.seal(key: key.dataKey, topic: o.topics.track('early'), body: early.encode(), signer: aliceId),
-          retain: true);
-      await eventually(() => events[b]!.whereType<MessageRejected>().isNotEmpty);
-      expect(b.tracks, isEmpty);
-      await o.addEditor(aliceId.id);
-      await eventually(() => b.tracks.containsKey('early'), reason: 'pending track accepted');
-      expect(b.trackSigner('early'), aliceId.id);
-      await t.disconnect();
-    });
-
-    test('replayed old track revision is ignored', () async {
-      final o = await create();
-      final a = await join(o, aliceId);
-      final (t, _, _) = await attacker(o, 'pw-1');
-      final captured = Completer<Uint8List>();
-      final sub = t.messages.listen((m) {
-        if (!captured.isCompleted && m.payload.isNotEmpty) captured.complete(m.payload);
-      });
-      final tr = await o.publishTrack(id: 'tr', gpx: named(gpxA, 'v1'));
-      await t.subscribe(o.topics.track(tr.id));
-      final v1 = await captured.future;
-      await sub.cancel();
-      await o.publishTrack(id: tr.id, gpx: named(gpxB, 'v2'));
-      await eventually(() => a.tracks[tr.id]?.name == 'v2');
-      await t.publish(o.topics.track(tr.id), v1, retain: true);
-      await settle();
-      expect(a.tracks[tr.id]!.name, 'v2');
-      expect(o.tracks[tr.id]!.name, 'v2');
-      await t.disconnect();
     });
 
     test('members and positions', () async {
@@ -282,191 +197,123 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final a = await join(o, aliceId);
       await a.setMemberName('Alice & Rex');
       await o.setMemberName('Owner');
-      final now = (h.clock ?? DateTime.now)();
-      await a.publishPosition(Position(lat: 45.2, lon: 5.3, time: now, accuracy: 5));
+      await a.publishPosition(Position(lat: 45.2, lon: 5.3, time: now(), accuracy: 5));
       await eventually(() => o.members[aliceId.id]?.name == 'Alice & Rex' && o.positions.containsKey(aliceId.id));
       await eventually(() => a.members[ownerId.id]?.name == 'Owner');
       expect(o.positions[aliceId.id]!.accuracy, 5);
-
-      await a.publishPosition(Position(lat: 45.21, lon: 5.31, time: now.add(const Duration(seconds: 5))));
+      await a.publishPosition(Position(lat: 45.21, lon: 5.31, time: now()));
       await eventually(() => o.positions[aliceId.id]?.lat == 45.21);
-
       await a.clearPosition();
-      await eventually(() => !o.positions.containsKey(aliceId.id), reason: 'cleared position');
+      await eventually(() => !o.positions.containsKey(aliceId.id));
       expect(events[o]!.whereType<PositionRemoved>(), isNotEmpty);
     });
 
-    test('forged member profiles and positions are rejected', () async {
-      final o = await create();
-      final (t, env, key) = await attacker(o, 'pw-1');
-      final topicA = o.topics.member(aliceId.id);
-      await t.publish(topicA,
-          env.seal(key: key.dataKey, topic: topicA, body: MemberDoc(name: 'fake', updated: DateTime.now()).encode(), signer: bobId),
-          retain: true);
-      final posA = o.topics.position(aliceId.id);
-      await t.publish(posA,
-          env.seal(key: key.dataKey, topic: posA, body: Position(lat: 1, lon: 1, time: (h.clock ?? DateTime.now)()).encode(), signer: bobId),
-          retain: true);
-      await eventually(() => events[o]!.whereType<MessageRejected>().length >= 2);
-      expect(o.members, isEmpty);
-      expect(o.positions, isEmpty);
-      await t.disconnect();
-    });
-
-    test('project updates propagate; fake meta from others is ignored', () async {
+    test('close clears the position shared by this session only', () async {
       final o = await create();
       final a = await join(o, aliceId);
-      await o.updateProject(name: 'Nouveau nom', settings: o.project.settings.copyWith(positionTtl: const Duration(minutes: 3)));
-      await eventually(() => a.project.name == 'Nouveau nom');
-      expect(a.project.settings.positionTtl, const Duration(minutes: 3));
-      expect(a.project.rev, 2);
-
-      final (t, _, _) = await attacker(o, 'pw-1');
-      final kdf = fastKdf(c);
-      final fake = ProjectMeta(kdf: kdf, keyCheck: ProjectKey.derive(c, 'hijack', kdf).check, rev: 99)
-          .seal(topic: o.topics.meta, owner: bobId);
-      await t.publish(o.topics.meta, fake, retain: true);
-      await eventually(() => events[a]!.whereType<MessageRejected>().isNotEmpty);
-      expect(a.locked, isFalse);
-      expect(events[a]!.whereType<PasswordChanged>(), isEmpty);
-      await t.disconnect();
-    });
-
-    test('password change locks others until unlocked with the new password', () async {
-      final o = await create();
-      final t = await o.publishTrack(gpx: named(gpxA, 'keep me'));
-      final gone = await o.publishTrack(gpx: named(gpxB, 'deleted'));
-      await o.deleteTrack(gone.id);
-      final a = await join(o, aliceId);
-      expect(a.memberId, aliceId.id);
-      await a.setMemberName('Alice');
-      await o.setMemberName('Owner');
-      await eventually(() => a.tracks.containsKey(t.id) && o.members.containsKey(aliceId.id));
-
-      await o.changePassword('pw-2', kdf: fastKdf(c));
-      await eventually(() => a.locked, reason: 'alice locked');
-      expect(events[a]!.whereType<PasswordChanged>(), hasLength(1));
-      expect(() => a.publishPosition(Position(lat: 1, lon: 1, time: DateTime.now())), throwsStateError);
-      await expectLater(a.unlock('pw-1'), throwsA(isA<WrongPasswordException>()));
-      await a.unlock('pw-2');
-      expect(a.locked, isFalse);
-      await eventually(() => a.tracks[t.id]?.rev == 2, reason: 're-sealed track');
-      expect(a.tracks.containsKey(gone.id), isFalse);
-      expect(a.project.rev, 2);
-      await a.setMemberName('Alice');
-      await eventually(() => o.members[aliceId.id]?.name == 'Alice');
-
-      await expectLater(join(o, bobId, password: 'pw-1'), throwsA(isA<WrongPasswordException>()));
-      final b = await join(o, bobId, password: 'pw-2');
-      await eventually(() => b.tracks.containsKey(t.id));
-      expect(b.tracks.containsKey(gone.id), isFalse);
-      expect(b.members[ownerId.id]?.name, 'Owner', reason: "owner's profile re-sealed");
-    });
-
-    test('deleteProject clears the broker; participants are notified', () async {
-      final o = await create();
-      await o.publishTrack(gpx: gpxA);
-      final a = await join(o, aliceId);
-      await a.setMemberName('A');
-      await eventually(() => o.members.isNotEmpty);
-      sessions.remove(o);
-      await o.deleteProject();
-      await eventually(() => events[a]!.whereType<ProjectDeleted>().isNotEmpty);
-      await expectLater(join(o, bobId, timeout: const Duration(milliseconds: 500)),
-          throwsA(isA<ProjectNotFoundException>()));
-      final r = h.retained;
-      if (r != null) expect(r.keys.where((k) => k.contains(o.projectId)), isEmpty);
-    });
-
-    test('close clears own position', () async {
-      final o = await create();
-      final a = await join(o, aliceId);
-      await a.publishPosition(Position(lat: 1, lon: 2, time: (h.clock ?? DateTime.now)()));
+      await a.publishPosition(Position(lat: 1, lon: 2, time: now()));
+      final a2 = await join(o, aliceId);
       await eventually(() => o.positions.containsKey(aliceId.id));
+      sessions.remove(a2);
+      await a2.close();
+      await settle();
+      expect(o.positions.containsKey(aliceId.id), isTrue);
       sessions.remove(a);
       await a.close();
       await eventually(() => !o.positions.containsKey(aliceId.id));
     });
 
-    test('password change right after join re-seals every track (short-lived owner session)', () async {
-      final o = await create();
-      final ids = [for (var i = 0; i < 5; i++) (await o.publishTrack(gpx: named(gpxA, 't$i'))).id];
-      // A fresh owner session (e.g. CLI, second device) must see all tracks
-      // before changing the password, or some would stay under the old key.
-      final o2 = await join(o, ownerId);
-      await o2.changePassword('pw-2', kdf: fastKdf(c));
-      final b = await join(o, bobId, password: 'pw-2');
-      expect(b.tracks.keys, unorderedEquals(ids));
-      expect(events[b]!.whereType<MessageRejected>(), isEmpty);
-    });
-
-    test('sync() barrier completes', () async {
-      final o = await create();
-      await o.sync();
-      final a = await join(o, aliceId);
-      await a.sync();
-    });
-
-    test('close only clears a position shared by this session', () async {
+    test('project updates: name, description, position TTL', () async {
       final o = await create();
       final a = await join(o, aliceId);
-      await a.publishPosition(Position(lat: 1, lon: 2, time: (h.clock ?? DateTime.now)()));
-      // Second session of the same identity (e.g. app UI vs background service).
-      final a2 = await join(o, aliceId);
-      await eventually(() => a2.positions.containsKey(aliceId.id) && o.positions.containsKey(aliceId.id));
-      sessions.remove(a2);
-      await a2.close();
-      await settle();
-      expect(o.positions.containsKey(aliceId.id), isTrue);
-    });
-
-    test('nothing but meta is readable on the broker', () async {
-      final log = h.log;
-      if (log == null) return markTestSkipped('broker log not observable');
-      final o = await create();
-      await o.publishTrack(gpx: named(gpxA, 'Trail name'));
-      final a = await join(o, aliceId);
-      await a.setMemberName('Alice Martin');
-      await a.publishPosition(Position(lat: 45.123456, lon: 5.654321, time: (h.clock ?? DateTime.now)()));
-      await settle();
-      for (final (topic, payload) in log) {
-        if (payload.isEmpty || !topic.contains(o.projectId)) continue;
-        final text = latin1.decode(payload);
-        for (final secret in ['Chambaran', 'Trail name', 'Secret forest', 'Alice', '45.12', 'samedi']) {
-          expect(text.contains(secret), isFalse, reason: '"$secret" leaked on $topic');
-        }
-        if (!topic.endsWith('/meta')) expect(text.startsWith('PEP1'), isTrue, reason: topic);
-      }
-    });
-
-    test('stale incoming positions are never shown', () async {
-      if (h.clock == null) return markTestSkipped('needs a controllable clock');
-      final o = await create(ttl: const Duration(minutes: 1));
-      final a = await join(o, aliceId);
-      final now = h.clock!();
-      await a.publishPosition(Position(lat: 1, lon: 2, time: now));
-      await eventually(() => o.positions.containsKey(aliceId.id));
-      // Same timestamp arriving after the TTL (e.g. a cached fix republished late).
-      h.advance(const Duration(minutes: 2));
-      await a.publishPosition(Position(lat: 1, lon: 2.5, time: now));
-      await eventually(() => events[o]!.whereType<PositionRemoved>().isNotEmpty);
-      expect(o.positions, isEmpty);
+      await o.updateProject(name: 'Nouveau nom', positionTtl: const Duration(minutes: 3));
+      await eventually(() => a.project.name == 'Nouveau nom' && a.project.positionTtl == const Duration(minutes: 3));
+      expect(a.project.description, 'Entraînement du samedi');
+      expect(a.project.rev, 2);
+      expect(events[a]!.whereType<ProjectUpdated>(), isNotEmpty);
     });
 
     test('positions expire after the project TTL', () async {
       if (h.clock == null) return markTestSkipped('needs a controllable clock');
       final o = await create(ttl: const Duration(minutes: 1));
       final a = await join(o, aliceId);
-      await a.publishPosition(Position(lat: 1, lon: 2, time: h.clock!()));
+      await a.publishPosition(Position(lat: 1, lon: 2, time: now()));
       await eventually(() => o.positions.containsKey(aliceId.id));
       h.advance(const Duration(seconds: 61));
-      expect(o.positions, isEmpty, reason: 'getter filters stale positions');
+      expect(o.positions, isEmpty);
       o.prunePositions();
       await eventually(() => events[o]!.whereType<PositionRemoved>().isNotEmpty);
-      final r = h.retained;
-      if (r != null) expect(r.containsKey(o.topics.position(aliceId.id)), isFalse, reason: 'broker expiry');
-      final b = await join(o, bobId);
-      expect(b.positions, isEmpty);
+    });
+
+    test('password change: lock, unlock, content preserved', () async {
+      final o = await create();
+      final t = await o.publishTrack(gpx: named(gpxA, 'keep me'));
+      final a = await join(o, aliceId);
+      await a.setMemberName('Alice');
+      await eventually(() => o.members.containsKey(aliceId.id));
+      await o.changePassword('pw-2', kdf: fastKdf(c));
+      await eventually(() => a.locked);
+      expect(events[a]!.whereType<PasswordChanged>(), hasLength(1));
+      await expectLater(a.unlock('pw-1'), throwsA(isA<WrongPasswordException>()));
+      await a.unlock('pw-2');
+      await eventually(() => a.tracks[t.id]?.rev == 2);
+      expect(a.tracks[t.id]!.name, 'keep me');
+      expect(a.project.name, 'Forêt de Chambaran');
+      expect(a.members.containsKey(aliceId.id), isFalse, reason: 'members re-publish after unlocking');
+      await a.setMemberName('Alice');
+      await eventually(() => o.members[aliceId.id]?.name == 'Alice');
+      await expectLater(join(o, bobId, password: 'pw-1'), throwsA(isA<WrongPasswordException>()));
+    });
+
+    test('wrong password and unknown project', () async {
+      final o = await create();
+      await expectLater(join(o, aliceId, password: 'nope'), throwsA(isA<WrongPasswordException>()));
+      await expectLater(
+          join(o, aliceId,
+              link: JoinLink(channelId: newUuid(c), ownerId: ownerId.id), timeout: const Duration(milliseconds: 500)),
+          throwsA(isA<ProjectNotFoundException>()));
+    });
+
+    test('deleteProject notifies participants', () async {
+      final o = await create();
+      await o.publishTrack(gpx: gpxA);
+      final a = await join(o, aliceId);
+      sessions.remove(o);
+      await o.deleteProject();
+      await eventually(() => events[a]!.whereType<ProjectDeleted>().isNotEmpty);
+      await expectLater(join(o, bobId, timeout: const Duration(milliseconds: 500)),
+          throwsA(isA<ProjectNotFoundException>()));
+    });
+
+    test('content types unknown to this version are ignored', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      // A newer app version adds a "photo" collection to the project.
+      await o.channel.updateAcl(
+          collections: {...o.channel.acl.collections, 'photo': const CollectionPolicy(Writers.editors)});
+      await o.channel.put('photo', 'p1', utf8Bytes('jpeg…'));
+      await eventually(() => a.channel.items('photo').containsKey('p1'), reason: 'channel carries it');
+      await settle();
+      expect(events[a]!.whereType<MessageRejected>(), isEmpty);
+      expect(a.tracks, isEmpty);
+    });
+
+    test('nothing readable on the broker', () async {
+      final log = h.log;
+      if (log == null) return markTestSkipped('broker log not observable');
+      final o = await create();
+      await o.publishTrack(gpx: named(gpxA, 'Trail name'));
+      final a = await join(o, aliceId);
+      await a.setMemberName('Alice Martin');
+      await a.publishPosition(Position(lat: 45.123456, lon: 5.654321, time: now()));
+      await settle();
+      for (final (topic, payload) in log) {
+        if (payload.isEmpty || !topic.contains(o.projectId)) continue;
+        final text = latin1.decode(payload);
+        for (final secret in ['Chambaran', 'Trail name', 'Secret forest', 'Alice', '45.12', 'samedi', 'cuir']) {
+          expect(text.contains(secret), isFalse, reason: '"$secret" leaked on $topic');
+        }
+      }
     });
   });
 }

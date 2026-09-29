@@ -9,9 +9,12 @@ Android and the web. Free and open source under the MIT license.
 - No central user database; a default broker is preconfigured and can be replaced.
 
 ## Status
-- `packages/pep_core` — shared Dart library (crypto, protocol, MQTT transport, project
-  sessions, GPX): functionally complete and tested on the Dart VM and in browsers.
-  See [`packages/pep_core/README.md`](packages/pep_core/README.md).
+- Shared Dart libraries, complete and tested on the Dart VM and in browsers:
+  - [`pep_channel`](packages/pep_channel) — secure channel: encryption, signatures, access
+    control, MQTT 5 transport;
+  - [`pep_content`](packages/pep_content) — content model: GPX with custom sections,
+    positions, profiles, project info;
+  - [`pep_core`](packages/pep_core) — project sessions (the apps' API) and the `pep` CLI.
 - Flutter apps (iOS, Android, web): next.
 
 Design and protocol: [`docs/DESIGN.md`](docs/DESIGN.md).
