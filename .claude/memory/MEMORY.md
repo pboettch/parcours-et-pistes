@@ -1,2 +1,3 @@
 - [GPX trail app project](project-gpx-trail-app.md) — Parcours et Pistes: encrypted RU/MT trail sharing over MQTT; decisions, pep_core status (done), next = Flutter apps, gotchas
 - [Repo conventions](feedback-repo-conventions.md) — memories/Claude scripts live in repo `.claude/`, git-managed, commit often
+- [GitHub repo & CI](reference-github-repo.md) — pboettch/parcours-et-pistes, gh authenticated, CI workflow status
