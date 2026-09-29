@@ -2,6 +2,9 @@
 /// of search-dog trails (GPX) and live positions over MQTT.
 library;
 
+// GPX custom sections are exposed as XmlElement (package:xml).
+export 'package:xml/xml.dart';
+
 export 'src/codec/bytes.dart' show b64u, unb64u, utf8Bytes;
 export 'src/crypto/envelope.dart';
 export 'src/crypto/identity.dart';

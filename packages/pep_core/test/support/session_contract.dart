@@ -47,6 +47,10 @@ const gpxA = '''<?xml version="1.0" encoding="UTF-8"?>
 
 final gpxB = gpxA.replaceAll('45.2005', '45.2105');
 
+/// [gpx] with a GPX metadata name (the track's display name).
+String named(String gpx, String name) =>
+    gpx.replaceFirstMapped(RegExp(r'<gpx[^>]*>'), (m) => '${m[0]}<metadata><name>$name</name></metadata>');
+
 void sessionContract(String name, SessionHarness Function() harnessFactory) {
   group('ProjectSession ($name)', () {
     late PepCrypto c;
@@ -144,18 +148,18 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
 
     test('join sees project and tracks published before and after joining', () async {
       final o = await create();
-      final t1 = await o.publishTrack(gpx: gpxA, name: 'Trail 1', notes: 'objets: 1');
+      final t1 = await o.publishTrack(gpx: named(gpxA, 'Trail 1'));
       final a = await join(o, aliceId);
       expect(a.isOwner, isFalse);
       expect(a.canEditTracks, isFalse);
       expect(a.project.name, 'Forêt de Chambaran');
       expect(a.tracks.containsKey(t1.id), isTrue, reason: 'join returns with all retained tracks');
-      expect(a.tracks[t1.id]!.gpx, gpxA);
+      expect(a.tracks[t1.id]!.gpx, named(gpxA, 'Trail 1'), reason: 'GPX transported byte for byte');
       expect(a.tracks[t1.id]!.name, 'Trail 1');
       expect(a.trackSigner(t1.id), ownerId.id);
-      expect(Gpx.parse(a.tracks[t1.id]!.gpx!).objects, hasLength(1));
+      expect(a.tracks[t1.id]!.document.objects, hasLength(1));
 
-      final t2 = await o.publishTrack(gpx: gpxB, name: 'Trail 2');
+      final t2 = await o.publishTrack(gpx: named(gpxB, 'Trail 2'));
       await eventually(() => a.tracks.containsKey(t2.id), reason: 'track 2 at alice');
       expect(events[a]!.whereType<TrackUpdated>().map((e) => e.track.id), contains(t2.id));
     });
@@ -163,9 +167,9 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
     test('track update and delete propagate; stale revisions are ignored', () async {
       final o = await create();
       final a = await join(o, aliceId);
-      final t = await o.publishTrack(gpx: gpxA, name: 'v1');
+      final t = await o.publishTrack(gpx: named(gpxA, 'v1'));
       await eventually(() => a.tracks[t.id]?.name == 'v1');
-      await o.publishTrack(id: t.id, gpx: gpxB, name: 'v2');
+      await o.publishTrack(id: t.id, gpx: named(gpxB, 'v2'));
       await eventually(() => a.tracks[t.id]?.name == 'v2');
       expect(a.tracks[t.id]!.rev, 2);
 
@@ -226,7 +230,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final b = await join(o, bobId);
       await o.addEditor(aliceId.id);
       await eventually(() => a.canEditTracks, reason: 'alice becomes editor');
-      final t = await a.publishTrack(gpx: gpxA, name: 'by alice');
+      final t = await a.publishTrack(gpx: named(gpxA, 'by alice'));
       await eventually(() => b.tracks.containsKey(t.id) && o.tracks.containsKey(t.id));
       expect(b.trackSigner(t.id), aliceId.id);
 
@@ -260,11 +264,11 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final sub = t.messages.listen((m) {
         if (!captured.isCompleted && m.payload.isNotEmpty) captured.complete(m.payload);
       });
-      final tr = await o.publishTrack(id: 'tr', gpx: gpxA, name: 'v1');
+      final tr = await o.publishTrack(id: 'tr', gpx: named(gpxA, 'v1'));
       await t.subscribe(o.topics.track(tr.id));
       final v1 = await captured.future;
       await sub.cancel();
-      await o.publishTrack(id: tr.id, gpx: gpxB, name: 'v2');
+      await o.publishTrack(id: tr.id, gpx: named(gpxB, 'v2'));
       await eventually(() => a.tracks[tr.id]?.name == 'v2');
       await t.publish(o.topics.track(tr.id), v1, retain: true);
       await settle();
@@ -330,8 +334,8 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
 
     test('password change locks others until unlocked with the new password', () async {
       final o = await create();
-      final t = await o.publishTrack(gpx: gpxA, name: 'keep me');
-      final gone = await o.publishTrack(gpx: gpxB, name: 'deleted');
+      final t = await o.publishTrack(gpx: named(gpxA, 'keep me'));
+      final gone = await o.publishTrack(gpx: named(gpxB, 'deleted'));
       await o.deleteTrack(gone.id);
       final a = await join(o, aliceId);
       expect(a.memberId, aliceId.id);
@@ -386,7 +390,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
 
     test('password change right after join re-seals every track (short-lived owner session)', () async {
       final o = await create();
-      final ids = [for (var i = 0; i < 5; i++) (await o.publishTrack(gpx: gpxA, name: 't$i')).id];
+      final ids = [for (var i = 0; i < 5; i++) (await o.publishTrack(gpx: named(gpxA, 't$i'))).id];
       // A fresh owner session (e.g. CLI, second device) must see all tracks
       // before changing the password, or some would stay under the old key.
       final o2 = await join(o, ownerId);
@@ -420,7 +424,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final log = h.log;
       if (log == null) return markTestSkipped('broker log not observable');
       final o = await create();
-      await o.publishTrack(gpx: gpxA, name: 'Trail name');
+      await o.publishTrack(gpx: named(gpxA, 'Trail name'));
       final a = await join(o, aliceId);
       await a.setMemberName('Alice Martin');
       await a.publishPosition(Position(lat: 45.123456, lon: 5.654321, time: (h.clock ?? DateTime.now)()));

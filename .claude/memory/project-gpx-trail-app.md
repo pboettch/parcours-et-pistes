@@ -50,6 +50,12 @@ sumo `sodium.js` via `dart_test.yaml` HTML template. Argon2id t=3/64 MiB: ~22 ms
 chosen as default KDF params. System mosquitto 2.1.2 installed; dev broker via `.claude/scripts/broker.sh`
 (ports 18883/18080) and retained-message expiry verified working.
 
+**Track content = GPX only (user decision, 2026-09-29):** RU objects are GPX waypoints
+(`<type>pep:object</type>`); *everything* related to a track travels in the GPX, with additional
+custom sections as `<extensions>` in namespace `urn:parcours-et-pistes:gpx:1` (prefix `pep`). The
+TrackDoc JSON wrapper carries only id/rev/upd/deleted + gpx. Concrete RU extension elements: TBD
+by the user.
+
 **Status (2026-09-29):** `packages/pep_core` phases 1–6 done and committed: 213 test runs green
 (VM + Chromium; memory broker + mosquitto TCP/TLS/WS/WSS/auth), ~96 % line coverage, `pep` CLI and
 `.claude/scripts/e2e.sh` pass. **Next: Flutter apps** (user wants to start them once the library is

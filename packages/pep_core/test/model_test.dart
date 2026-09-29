@@ -99,20 +99,20 @@ void main() {
 
   group('TrackDoc', () {
     test('round trip live and tombstone', () {
-      final t = TrackDoc(
-          id: 't1',
-          rev: 3,
-          updated: DateTime.utc(2026),
-          name: 'Trail 1',
-          discipline: Discipline.mt,
-          gpx: '<gpx/>',
-          notes: 'n',
-          extra: {'k': 'v'});
-      expect(TrackDoc.decode(t.encode()).toJson(), t.toJson());
-      final d = TrackDoc.decode(TrackDoc.tombstone('t1', rev: 4).encode());
-      expect(d.deleted, isTrue);
-      expect(d.gpx, isNull);
-      expect(d.rev, 4);
+      final t = TrackDoc(id: 't1', rev: 3, updated: DateTime.utc(2026), gpx: '<gpx><metadata><name>Trail 1</name></metadata></gpx>');
+      final d = TrackDoc.decode(t.encode());
+      expect(d.toJson(), t.toJson());
+      expect(d.name, 'Trail 1', reason: 'name comes from the GPX');
+      final x = TrackDoc.decode(TrackDoc.tombstone('t1', rev: 4).encode());
+      expect(x.deleted, isTrue);
+      expect(x.gpx, isNull);
+      expect(x.rev, 4);
+      expect(() => x.document, throwsStateError);
+    });
+
+    test('name falls back to the first track name', () {
+      final t = TrackDoc(id: 't', rev: 1, updated: DateTime.utc(2026), gpx: '<gpx><trk><name>T</name></trk></gpx>');
+      expect(t.name, 'T');
     });
 
     test('live track requires gpx', () {

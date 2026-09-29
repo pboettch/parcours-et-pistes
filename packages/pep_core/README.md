@@ -21,7 +21,7 @@ final project = await ProjectSession.create(
   crypto: crypto, transport: transport, identity: me,
   name: 'Forêt de Chambaran', discipline: Discipline.ru, password: 'secret',
 );
-await project.publishTrack(gpx: gpxString, name: 'Piste 1');
+await project.publishTrack(gpx: gpxString); // name, objects, custom sections: all in the GPX
 final link = project.joinLink.toUri();          // share link and password separately
 
 // Participant
@@ -41,7 +41,7 @@ session.events.listen((e) {
   }
 });
 await session.publishPosition(Position(lat: 45.2, lon: 5.3, time: DateTime.now()));
-final objects = Gpx.parse(session.tracks.values.first.gpx!).objects;   // RU objects
+final objects = session.tracks.values.first.document.objects;   // RU objects = GPX waypoints
 ```
 
 Main API: `ProjectSession` (`create`, `join`, `publishTrack`, `deleteTrack`, `addEditor`,

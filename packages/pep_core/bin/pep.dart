@@ -44,8 +44,8 @@ Future<void> main(List<String> argv) async {
         _common()
           ..addOption('gpx', mandatory: true)
           ..addOption('id', help: 'Update this track id')
-          ..addOption('name')
-          ..addOption('notes'))
+          ..addOption('name', help: 'Set the GPX metadata name')
+          ..addOption('description', help: 'Set the GPX metadata description'))
     ..addCommand('rm', _common())
     ..addCommand('export', _common()..addOption('out', defaultsTo: '.'))
     ..addCommand('pos', _common()..addOption('acc'))
@@ -101,7 +101,7 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
         linkBroker: cmd.option('link-broker'),
       );
       for (final f in cmd.multiOption('gpx')) {
-        final t = await s.publishTrack(gpx: File(f).readAsStringSync(), name: _basename(f));
+        final t = await s.publishTrack(gpx: _readGpx(f));
         stderr.writeln('published track ${t.id} (${t.name})');
       }
       print(s.joinLink.toUri());
@@ -131,9 +131,7 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
     case 'push':
       final t = await s.publishTrack(
         id: cmd.option('id'),
-        gpx: File(cmd.option('gpx')!).readAsStringSync(),
-        name: cmd.option('name') ?? _basename(cmd.option('gpx')!),
-        notes: cmd.option('notes'),
+        gpx: _readGpx(cmd.option('gpx')!, name: cmd.option('name'), description: cmd.option('description')),
       );
       print('${t.id} rev ${t.rev}');
     case 'rm':
@@ -277,6 +275,15 @@ Identity _loadIdentity(PepCrypto c, String path) {
   return id;
 }
 
+/// Reads a GPX file; sets the metadata name/description when given, and the
+/// name from the file name when the GPX has none. Otherwise publishes it as is.
+String _readGpx(String path, {String? name, String? description}) {
+  final xml = File(path).readAsStringSync();
+  final g = Gpx.parse(xml);
+  if (name == null && description == null && (g.name != null || g.tracks.any((t) => t.name != null))) return xml;
+  return g.copyWith(name: name ?? g.name ?? _basename(path), description: description).toXml();
+}
+
 String _basename(String path) => path.split(Platform.pathSeparator).last.replaceAll(RegExp(r'\.gpx$'), '');
 
 String _safe(String s) => s.replaceAll(RegExp(r'[^\w.-]+'), '_');
@@ -290,7 +297,7 @@ commands:
   create --name N [--discipline ru|mt] [--gpx f]...   create a project, print its join link
   info <link>                         show project and tracks
   watch <link>                        follow tracks, members and positions live
-  push <link> --gpx f [--id T]        publish (or update) a track (owner/editor)
+  push <link> --gpx f [--id T] [--name N]   publish (or update) a track (owner/editor)
   rm <link> <track id>                delete a track (owner/editor)
   export <link> [--out dir]           write all tracks as .gpx files
   pos <link> <lat> <lon> [--acc m]    share a position

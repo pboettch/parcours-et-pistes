@@ -8,7 +8,6 @@ import '../crypto/kdf.dart';
 import '../crypto/pep_crypto.dart';
 import '../errors.dart';
 import '../model/gpx.dart';
-import '../model/json.dart';
 import '../model/member.dart';
 import '../model/meta.dart';
 import '../model/position.dart';
@@ -221,28 +220,14 @@ class ProjectSession {
 
   // -------------------------------------------------------------- actions
 
-  /// Publishes a new track, or a new revision of track [id]. Returns the
-  /// published document.
-  Future<TrackDoc> publishTrack({
-    String? id,
-    required String gpx,
-    String? name,
-    String? notes,
-    Json extra = const {},
-  }) async {
+  /// Publishes a new track, or a new revision of track [id]. All track content
+  /// (name, objects, custom sections) is part of the [gpx] document (see
+  /// [Gpx.toXml]). Returns the published document.
+  Future<TrackDoc> publishTrack({String? id, required String gpx}) async {
     _requireTrackEditor();
     Gpx.parse(gpx); // reject invalid GPX before publishing
     final tid = id ?? newTrackId(_c);
-    final doc = TrackDoc(
-      id: tid,
-      rev: (_trackRevs[tid] ?? 0) + 1,
-      updated: _now(),
-      name: name,
-      discipline: project.discipline,
-      gpx: gpx,
-      notes: notes,
-      extra: extra,
-    );
+    final doc = TrackDoc(id: tid, rev: (_trackRevs[tid] ?? 0) + 1, updated: _now(), gpx: gpx);
     await _publishSealed(topics.track(tid), doc.encode());
     return doc;
   }
@@ -326,16 +311,7 @@ class ProjectSession {
     for (final t in tracks) {
       await _publishSealed(
           topics.track(t.id),
-          TrackDoc(
-            id: t.id,
-            rev: t.rev + 1,
-            updated: _now(),
-            name: t.name,
-            discipline: t.discipline,
-            gpx: t.gpx,
-            notes: t.notes,
-            extra: t.extra,
-          ).encode());
+          TrackDoc(id: t.id, rev: t.rev + 1, updated: _now(), gpx: t.gpx).encode());
     }
     for (final id in tombstones) {
       await _publishSealed(topics.track(id), TrackDoc.tombstone(id, rev: _trackRevs[id]! + 1, now: _now()).encode());

@@ -66,11 +66,25 @@ or project. `lp16` = u16 big-endian length prefix.
 
 **Bodies** (JSON, `"v":1`):
 - project: `id, name, desc?, disc ("ru"|"mt"), owner, editors[], settings{posTtl, …}, rev, upd`
-- track: `id, rev, upd, name?, disc?, gpx, notes?, extra{}` or tombstone `id, rev, upd, deleted:true`
+- track: `id, rev, upd, gpx` or tombstone `id, rev, upd, deleted:true` — see *Track content*
 - member: `name, upd`
 - position: `lat, lon, ts, alt?, acc?, hdg?, spd?` (ts in ms since epoch, UTC)
 
-Unknown settings/`extra` fields are preserved; documents with a higher `v` are rejected.
+Unknown project settings are preserved; documents with a higher `v` are rejected.
+
+## Track content (GPX)
+Everything related to a track travels **inside the GPX 1.1 document**; the JSON wrapper only
+carries protocol data (id, revision, timestamp, tombstone flag).
+- Display name / description: `<metadata><name>` / `<desc>` (fallback: first `<trk><name>`).
+- The trail: `<trk>` (and `<rte>`, read as a single-segment track).
+- RU objects: `<wpt>` with `<type>pep:object</type>`.
+- Additional information: custom `<extensions>` sections in the namespace
+  `urn:parcours-et-pistes:gpx:1` (prefix `pep`) — at file level (`<metadata><extensions>`,
+  root `<extensions>`), on waypoints/objects, tracks/routes and points. The exact elements for
+  RU details are still to be specified.
+- Foreign extensions (e.g. Garmin) are preserved on parse → write; each preserved element carries
+  its own namespace declarations. Other unknown elements are dropped when a GPX is rewritten
+  (the GPX string is published byte for byte unless an app rewrites it).
 
 ## Client rules
 - Decrypt, verify the signature, then authorize: project → owner; track → owner or current
