@@ -9,7 +9,12 @@ Android and the web. Free and open source under the MIT license.
 - No central user database; a default broker is preconfigured and can be replaced.
 
 ## Status
-Work in progress: the shared Dart library `packages/pep_core` is being built first.
+- `packages/pep_core` — shared Dart library (crypto, protocol, MQTT transport, project
+  sessions, GPX): functionally complete and tested on the Dart VM and in browsers.
+  See [`packages/pep_core/README.md`](packages/pep_core/README.md).
+- Flutter apps (iOS, Android, web): next.
+
+Design and protocol: [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## License
 MIT — see [LICENSE](LICENSE).

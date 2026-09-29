@@ -334,7 +334,9 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final gone = await o.publishTrack(gpx: gpxB, name: 'deleted');
       await o.deleteTrack(gone.id);
       final a = await join(o, aliceId);
+      expect(a.memberId, aliceId.id);
       await a.setMemberName('Alice');
+      await o.setMemberName('Owner');
       await eventually(() => a.tracks.containsKey(t.id) && o.members.containsKey(aliceId.id));
 
       await o.changePassword('pw-2', kdf: fastKdf(c));
@@ -354,6 +356,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final b = await join(o, bobId, password: 'pw-2');
       await eventually(() => b.tracks.containsKey(t.id));
       expect(b.tracks.containsKey(gone.id), isFalse);
+      expect(b.members[ownerId.id]?.name, 'Owner', reason: "owner's profile re-sealed");
     });
 
     test('deleteProject clears the broker; participants are notified', () async {
@@ -430,6 +433,20 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
         }
         if (!topic.endsWith('/meta')) expect(text.startsWith('PEP1'), isTrue, reason: topic);
       }
+    });
+
+    test('stale incoming positions are never shown', () async {
+      if (h.clock == null) return markTestSkipped('needs a controllable clock');
+      final o = await create(ttl: const Duration(minutes: 1));
+      final a = await join(o, aliceId);
+      final now = h.clock!();
+      await a.publishPosition(Position(lat: 1, lon: 2, time: now));
+      await eventually(() => o.positions.containsKey(aliceId.id));
+      // Same timestamp arriving after the TTL (e.g. a cached fix republished late).
+      h.advance(const Duration(minutes: 2));
+      await a.publishPosition(Position(lat: 1, lon: 2.5, time: now));
+      await eventually(() => events[o]!.whereType<PositionRemoved>().isNotEmpty);
+      expect(o.positions, isEmpty);
     });
 
     test('positions expire after the project TTL', () async {

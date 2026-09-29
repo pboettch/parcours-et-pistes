@@ -1,119 +1,127 @@
-# pep_core: shared low-level library for "Parcours et Pistes"
+# Parcours et Pistes — design and protocol (v1)
 
-## Context
-We're building a free, open-source (MIT) app for iOS, Android and the web for sharing search-dog trails:
-- **RU** (Recherche Utilitaire): track + object positions + extra info
-- **MT** (Man Trailing): track only
+This document describes the protocol as implemented in `packages/pep_core`.
+It is the reference for the Flutter apps and for anyone reviewing the security.
 
-A creator makes a project, imports GPX tracks and shares a link plus a password. Participants decrypt the tracks and live-share their positions within the project.
+## Goals and constraints
+- Share search-dog trails (*Recherche Utilitaire* — track + objects; *Man Trailing* — track only)
+  between a project creator and participants, plus live positions.
+- **No central user database.** Identities are device key pairs; all project data lives on an
+  MQTT 5 broker under the project's secret UUID.
+- **Nothing readable on the broker** except the minimal key-derivation metadata.
+- A default broker/account is preconfigured in the apps and can be replaced.
+- Free and open source (MIT). Apps in Flutter (iOS, Android, web); `pep_core` is pure Dart and
+  runs on the Dart VM and in browsers.
 
-**Design constraints:**
-- There is no central user database.
-- All project data lives on an MQTT broker under the project's UUID topic, as compressed and encrypted retained messages. Nothing is ever published unencrypted.
-- A default broker and account are preconfigured, and users can change them.
-- Apps will be built in **Flutter**. Background location is handled by the app later; OwnTracks serves only as a behavioural reference.
+## Cryptography
+| Purpose | Primitive (libsodium) |
+|---|---|
+| Password → key | Argon2id (`crypto_pwhash`, default t=3, 64 MiB), 16-byte random salt |
+| Subkeys | `crypto_kdf` (BLAKE2b) context `PEPv1key`: id 1 = data key, id 2 = key-check key |
+| Key check | `BLAKE2b-128(key = check key, "pep-key-check")`, public in `meta` |
+| Encryption | XChaCha20-Poly1305 (IETF AEAD), random 24-byte nonce, AD = topic |
+| Signatures | Ed25519; member id = unpadded base64url of the 32-byte public key |
+| Compression | raw deflate, prefixed with the u32 uncompressed length (max 64 MiB) |
 
-This plan covers **only the shared library**. App work starts once the library passes full functional tests.
+KDF parameters read from the broker are bounded (t ≤ 10, m ≤ 256 MiB) against DoS.
+On the web, libsodium runs as `sodium.js` (sumo build, WebAssembly): Argon2id at the default
+parameters takes ~75 ms in Chromium, ~20 ms on the Dart VM (2026 desktop hardware).
 
-## Step 0: Repo, memory and git setup
-- Run `git init` in `/home/pmp/devel/parcours-et-pistes` on branch `main`, with a `.gitignore` covering `.dart_tool/`, `build/`, `*.lock` for the app later, and `.claude/settings.local.json`.
-- Keep **all Claude-related files in the repo** under `.claude/`:
-  - `.claude/memory/`: memory files + `MEMORY.md` index
-  - `.claude/scripts/`: helper scripts
-  - `.claude/settings.json` and `.claude/launch.json` as needed
-- Replace the empty `~/.claude/projects/-home-pmp-devel-parcours-et-pistes/memory/` with a **symlink** to `<repo>/.claude/memory`. Automatic memory recall keeps working, and the files are versioned with git.
-- Add a root `CLAUDE.md` with a short project overview, the repo layout, the "commit often" rule and a pointer to `.claude/memory/`.
-- Memories to write:
-  - `project-gpx-trail-app.md`: the summary above + the key decisions below
-  - `feedback-repo-conventions.md`: memories and Claude scripts live in the repo, and we commit often
-- **Commit often:** one commit per logical step (setup, each phase, each green test milestone), with messages ending in the Co-Authored-By line.
+## Identities, roles, trust
+- Each device generates an Ed25519 identity; the 32-byte seed is kept in secure storage.
+- **Owner**: the project creator. Signs `meta` and the project document.
+- **Editors**: member ids listed in the project document; may publish and delete tracks.
+- **Participants**: anyone holding the password; may publish their own profile and position.
+- The **join link** carries the owner id; it is the trust anchor. `meta` and the project document
+  must be signed by exactly that key.
 
-## Key decisions
-| Topic | Choice | Why |
+## Topic layout
+Base `pep/v1` (configurable). All messages are retained except `sync` probes.
+
+```text
+<base>/<uuid>/meta            owner-signed plaintext: KDF params, key check, rev
+<base>/<uuid>/project         sealed, signed by the owner
+<base>/<uuid>/track/<id>      sealed, signed by the owner or an editor (tombstone to delete)
+<base>/<uuid>/member/<id>     sealed, signed by member <id>
+<base>/<uuid>/pos/<id>        sealed, signed by member <id>; MQTT message expiry = position TTL
+<base>/<uuid>/sync/<nonce>    empty, non-retained barrier probe
+```
+
+Clients subscribe to `<base>/<uuid>/#` only — with a literal UUID. The UUID (122 random bits,
+from libsodium's CSPRNG) is a secret: see *Broker requirements*.
+
+## Wire formats
+**meta** (plaintext): `signature[64] | json`, signature over
+`"pep-meta-v1" | lp16(topic) | json`, with
+`json = {"v":1, "kdf":{"alg":"argon2id13","ops":…,"mem":…,"salt":b64u}, "check":b64u, "rev":n}`.
+
+**Sealed payload** (everything else):
+```text
+"PEP1" | version u8 (=1) | nonce[24] | XChaCha20-Poly1305(data key, AD = topic, plaintext)
+plaintext = flags u8 (bit0 = deflated) | signer public key[32] | signature[64] | body
+signature = Ed25519("pep-sig-v1" | lp16(topic) | flags | body)
+```
+Binding the topic both as AD and in the signature prevents moving a payload to another topic
+or project. `lp16` = u16 big-endian length prefix.
+
+**Bodies** (JSON, `"v":1`):
+- project: `id, name, desc?, disc ("ru"|"mt"), owner, editors[], settings{posTtl, …}, rev, upd`
+- track: `id, rev, upd, name?, disc?, gpx, notes?, extra{}` or tombstone `id, rev, upd, deleted:true`
+- member: `name, upd`
+- position: `lat, lon, ts, alt?, acc?, hdg?, spd?` (ts in ms since epoch, UTC)
+
+Unknown settings/`extra` fields are preserved; documents with a higher `v` are rejected.
+
+## Client rules
+- Decrypt, verify the signature, then authorize: project → owner; track → owner or current
+  editor; member/pos → the member named in the topic. Failures are reported and ignored.
+- Revisions: project, meta and each track carry `rev`; lower or equal revisions are ignored
+  (replay protection for clients that saw the newer one). Members/positions use timestamps.
+- Tracks signed by a not-yet-listed editor are kept pending and re-checked whenever the
+  project document changes (live race between "add editor" and the editor's first publish).
+- Positions are shown only while `ts` is within the TTL (and at most 5 min in the future);
+  the broker drops them via message expiry.
+- **Sync barrier**: after subscribing, a client publishes an empty non-retained message to
+  `sync/<nonce>` and waits for it; everything received before it is the complete retained
+  state. `join` does this before returning.
+- **Password change** (owner): publish new `meta` (rev+1) first — other clients lock and ask
+  for the new password — then re-seal the project doc, all tracks (re-signed by the owner,
+  rev+1) and tombstones, the owner's profile; clear other members' profiles and positions.
+- **Delete project** (owner): clear all retained topics (meta last).
+- Tracks are discovered from their own retained topics; there is no index, so editors can
+  publish without the owner.
+
+## Join link
+`<prefix>#p=<uuid>&o=<owner id>[&b=<broker url>][&t=<topic base>]` — everything in the
+fragment (never sent to web servers). Default prefix `parcoursetpistes://join`. The password is
+never part of the link.
+
+## Transport
+`Transport` interface (awaitable QoS 1 publish and subscribe, retained, message expiry,
+reconnect with re-subscription). Implementations: `Mqtt5Transport` (`mqtt5_client`; VM: mqtt,
+mqtts, ws, wss; browser: ws, wss) and `MemoryTransport` (tests). Apps may plug in a platform
+client, e.g. for background location sharing.
+
+TLS: normal certificate validation; for self-hosted brokers with self-signed certificates,
+`BrokerConfig.pinnedCertificates` accepts server certificates by SHA-256 fingerprint (VM only;
+browsers apply their own trust). Broker refusals (bad credentials, ACL-denied publish or
+subscribe) surface as `TransportException`.
+
+## Broker requirements (production)
+- MQTT 5 with message expiry; retained messages persisted indefinitely; TLS on all listeners.
+- **Deny wildcard subscriptions above the UUID level** (`pep/v1/#`, `pep/v1/+/…`) for normal
+  accounts so UUIDs cannot be enumerated. Plain mosquitto ACLs cannot express this; use an auth
+  plugin (e.g. mosquitto-go-auth) or a broker with richer authorization (e.g. EMQX).
+- Optional hardening: per-project write restrictions (see threat model).
+
+## Threat model (summary)
+| Attacker | Can | Cannot |
 |---|---|---|
-| Language | **Pure Dart package** | Flutter apps use it directly on iOS, Android and the web, with no FFI or bindings to maintain. It's the easiest option for all three targets. |
-| Crypto | **libsodium** via `sodium` (Dart VM + web via sodium.js); apps inject the `sodium_libs` instance | Audited library that is fast everywhere, including Argon2id on the web (wasm). |
-| KDF | Argon2id(password, salt, params) → 32-byte project key. Params and salt are stored in the plaintext `meta` topic. | Params are versioned, so they can be tuned later. |
-| Cipher | XChaCha20-Poly1305 AEAD, with a random 24-byte nonce and the topic path as associated data | Random nonces are safe at this size, and the associated data stops a message being replayed onto another topic. |
-| Compression | Deflate (`archive` package, pure Dart), applied before encryption | Works on every platform, and GPX (XML) compresses well. |
-| Integrity / roles | Each device has a local **Ed25519 identity**. The project doc is signed by the **owner** and lists **editor** public keys (delegation). Track docs must be signed by the owner or a listed editor. Positions are signed by their sender. Signatures sit *inside* the ciphertext. | Participants reject forgeries. The owner can grant or revoke editors by republishing the project doc. |
-| Trust anchor | The join link carries the UUID and the owner-key fingerprint (plus an optional broker) in the URL **fragment**. The password is shared separately. | New joiners can't be fooled by a replaced project doc. The fragment isn't sent to web servers. |
-| MQTT | `mqtt5_client` (TCP/TLS on native, WSS in the browser), behind a pluggable `Transport` interface | You chose "both, pluggable". MQTT 5 is needed for message expiry on positions. |
-| Position TTL | Retained publish with MQTT 5 **message expiry** = project setting, plus a client-side filter on the timestamp | The broker removes stale positions, and clients stay correct even if a broker ignores expiry. |
-| License | MIT | Your choice. |
+| Broker admin / network observer (TLS off) | see topic names, sizes, timing, KDF params; delete or replay retained messages | read any content; forge messages |
+| Knows the UUID, not the password | delete/replace retained messages (vandalism), replay old ciphertexts to new joiners | read or forge; fake a password change (meta is owner-signed) |
+| Holds the password | read everything; publish own profile/position | forge the project doc or tracks (unless editor); impersonate other members |
+| Editor | publish/delete tracks | change settings, editors or password |
 
-## Topic layout (base configurable, default `pep/v1`)
-```
-pep/v1/<uuid>/meta                  retained, plaintext JSON: format version, KDF alg+params, salt
-pep/v1/<uuid>/project               retained, sealed+signed(owner): name, discipline RU|MT, settings
-                                     (position TTL…), owner pubkey, editors[], track index [{id, rev, sha256}]
-pep/v1/<uuid>/track/<trackId>       retained, sealed+signed(owner|editor): compressed GPX + metadata
-pep/v1/<uuid>/member/<memberId>     retained, sealed+signed: display name, pubkey
-pep/v1/<uuid>/pos/<memberId>        retained + expiry, sealed+signed: lat, lon, alt, acc, hdg, spd, ts
-```
-- **Update:** republish the same topic (retained replaces the old message).
-- **Delete:** publish an empty retained payload.
-- **Clients** subscribe only to `pep/v1/<uuid>/#` (a literal UUID).
-
-**Broker note (out of library scope; documented in `tools/broker/README.md`):** we want to forbid wildcard subscriptions above the UUID level (e.g. `pep/v1/#` or `pep/v1/+/…`), so UUIDs stay secret. Plain Mosquitto ACLs can't express this, so it needs an auth plugin (mosquitto-go-auth or dynsec) or EMQX authz. For development we ship a Mosquitto docker-compose (MQTT 5, TLS and WebSockets) without that rule.
-
-## Envelope format (binary, all sealed payloads)
-`magic "PEP1" | version u8 | nonce[24] | AEAD(key, ad=topic, plaintext)`
-The plaintext is `flags(compressed) | signerPubKey[32] | signature[64] | body`, where the body is deflated JSON or GPX bytes and the signature covers `topic || body`.
-
-## Package layout
-```
-parcours-et-pistes/
-  LICENSE (MIT), README.md, CLAUDE.md, .gitignore
-  .claude/memory/  .claude/scripts/  .claude/settings.json
-  packages/pep_core/
-    lib/pep_core.dart            public exports
-    lib/src/crypto/              kdf.dart, envelope.dart, identity.dart (Ed25519)
-    lib/src/codec/               compression.dart, json models
-    lib/src/model/               project_doc.dart, track_doc.dart, position.dart, member.dart,
-                                 gpx.dart (GPX parse/write; RU objects as <wpt> + pep: extensions)
-    lib/src/protocol/            topics.dart, join_link.dart, validation (signature/role checks)
-    lib/src/transport/           transport.dart (abstract), mqtt5_transport.dart, memory_transport.dart
-    lib/src/session/             project_session.dart (high-level API)
-    bin/pep.dart                 CLI for manual end-to-end testing
-    test/                        unit + integration tests
-  tools/broker/                  docker-compose.yml, mosquitto.conf, README.md
-```
-
-## Public API (high level)
-- `PepCore.init(sodium)`: initialises the library with the libsodium instance to use.
-- `Identity.generate() / export / import`
-- `ProjectSession.create(transport, identity, name, discipline, password, settings)` → session + `JoinLink`
-- `ProjectSession.join(transport, identity, link, password)`
-- Session methods:
-  - `publishTrack(gpx, meta)`, `deleteTrack(id)`
-  - `addEditor(pubKey)`, `removeEditor`
-  - `updateSettings`, `changePassword` (owner re-seals everything)
-  - `publishPosition(pos)`, `clearPosition()`
-  - `setMember(displayName)`, `leave()`
-- Streams: `project`, `tracks`, `positions` (TTL-filtered), `members`, `errors` (e.g. rejected or forged messages)
-- `Transport`: `connect`, `publish(topic, bytes, {retain, expiry})`, `subscribe(filter)`, `messages`, `disconnect`, connection-state stream
-
-## Implementation phases
-1. **Spike (half a day).** Verify on the Dart VM and in Chrome that `sodium` works (Argon2id timing on the web, AEAD, Ed25519) and that `mqtt5_client` works (WSS, retained messages, message expiry against Mosquitto). If Argon2id on the web is too slow at safe params, fall back to a lower memory cost. The params are stored per project.
-2. Crypto, envelope and compression, with test vectors.
-3. Models, GPX (tracks + RU object waypoints) and topics/join link.
-4. Transport interface, in-memory transport and MQTT 5 transport.
-5. `ProjectSession`: create, join, tracks, editors, positions + TTL, password change, signature enforcement.
-6. CLI and broker tooling, then README and API docs.
-
-Each phase ends with its tests green and a git commit. Larger phases get intermediate commits.
-
-## Verification
-- `dart test` (VM) and `dart test -p chrome` (web) run the unit tests:
-  - crypto round-trips, and tampering, wrong-password and wrong-topic failures
-  - signature and role enforcement: an editor added then removed, and a forged track rejected
-  - GPX round-trip
-  - TTL filtering
-- Integration tests run the same suite against `tools/broker` Mosquitto (TCP/TLS on the VM, WSS in Chrome):
-  - two sessions (owner + participant) share tracks
-  - positions appear, then expire
-  - a delegated editor updates a track
-  - after a password change, the old password fails
-- Manual end-to-end with the CLI in two terminals: `pep create --gpx trail.gpx` prints the link. Then `pep join <link>` followed by `pep watch` shows tracks, and `pep pos 45.1 5.7` shows positions live.
-- Using `mosquitto_sub -v -t 'pep/v1/#'` as the admin confirms that every payload except `meta` is opaque ciphertext.
+Known limitations: deletion/vandalism by UUID holders needs broker-side ACLs; a new joiner can
+be served an old (replayed) revision; after a password change, former members keep what they
+already downloaded; tracks re-sealed during a password change are attributed to the owner.

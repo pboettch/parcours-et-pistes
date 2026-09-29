@@ -12,7 +12,8 @@ import 'transport.dart';
 
 /// Broker connection settings.
 class BrokerConfig {
-  BrokerConfig(this.url, {this.username, this.password, this.clientId, this.keepAlive = 30});
+  BrokerConfig(this.url,
+      {this.username, this.password, this.clientId, this.keepAlive = 30, this.pinnedCertificates = const {}});
 
   /// `mqtt://host[:1883]`, `mqtts://host[:8883]`, `ws://host[:port]/path`,
   /// `wss://host[:port]/path`. Browsers support only ws/wss.
@@ -25,6 +26,12 @@ class BrokerConfig {
 
   /// Keep-alive interval in seconds.
   final int keepAlive;
+
+  /// SHA-256 fingerprints (lowercase hex of the DER encoding) of server
+  /// certificates accepted even when they do not chain to a trusted root, e.g.
+  /// a self-hosted broker with a self-signed certificate. Dart VM only
+  /// (mqtts/wss); in browsers, certificate trust is up to the browser.
+  final Set<String> pinnedCertificates;
 }
 
 /// [Transport] backed by `mqtt5_client` (MQTT 5, QoS 1, auto-reconnect with
@@ -62,7 +69,7 @@ class Mqtt5Transport implements Transport {
   @override
   Future<void> connect() async {
     if (_client != null) return;
-    final c = createMqttClient(config.url, _clientId)
+    final c = createMqttClient(config.url, _clientId, pinnedCertificates: config.pinnedCertificates)
       ..logging(on: false)
       ..keepAlivePeriod = config.keepAlive
       ..autoReconnect = true

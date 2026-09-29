@@ -171,12 +171,13 @@ class MemoryHarness implements TransportHarness {
 
 /// Harness for a real broker.
 class BrokerHarness implements TransportHarness {
-  BrokerHarness(this.url);
+  BrokerHarness(this.url, {this.pins = const {}});
 
   final Uri url;
+  final Set<String> pins;
 
   @override
-  Transport create() => Mqtt5Transport(BrokerConfig(url));
+  Transport create() => Mqtt5Transport(BrokerConfig(url, pinnedCertificates: pins));
 
   @override
   Future<void> advance(Duration d) => Future<void>.delayed(d);

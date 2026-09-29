@@ -151,6 +151,17 @@ void main() {
       expect(() => inflate(z, maxSize: 1000), throwsA(isA<FormatPepException>()));
     });
 
+    test('rejects a length prefix smaller than the real content', () {
+      final z = deflate(Uint8List(100000));
+      final lying = Uint8List.fromList(z)
+        ..setRange(0, 4, [0, 0, 0x03, 0xe8]); // claims 1000 bytes
+      expect(() => inflate(lying), throwsA(isA<FormatPepException>()));
+    });
+
+    test('refuses to compress more than the maximum', () {
+      expect(() => deflate(Uint8List(maxDecompressedSize + 1)), throwsArgumentError);
+    });
+
     test('rejects corrupt or truncated data', () {
       final z = deflate(utf8Bytes('hello hello hello hello hello'));
       for (final bad in [

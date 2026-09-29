@@ -18,3 +18,5 @@ tools/broker/data/
 tools/broker/log/
 tools/broker/certs/*.key
 packages/pep_core/test/web/sodium.js
+tools/broker/certs/
+tools/broker/passwd

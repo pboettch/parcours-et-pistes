@@ -9,7 +9,7 @@ import 'package:test/test.dart';
 import 'support/broker.dart';
 import 'support/session_contract.dart';
 
-const _isWeb = bool.fromEnvironment('dart.library.js_interop');
+
 
 class _BrokerHarness implements SessionHarness {
   _BrokerHarness(this.url);
@@ -33,6 +33,6 @@ class _BrokerHarness implements SessionHarness {
 }
 
 void main() {
-  sessionContract('mqtt5 ${_isWeb ? 'websocket' : 'tcp'}',
-      () => _BrokerHarness(Uri.parse(_isWeb ? brokerWs : brokerTcp)));
+  sessionContract('mqtt5 ${isWeb ? 'websocket' : 'tcp'}',
+      () => _BrokerHarness(Uri.parse(isWeb ? brokerWs : brokerTcp)));
 }

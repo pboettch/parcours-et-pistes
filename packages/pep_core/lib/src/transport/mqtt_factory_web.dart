@@ -4,7 +4,7 @@ import 'package:mqtt5_client/mqtt5_client.dart';
 import 'transport.dart';
 
 /// Browser: only WebSocket (ws/wss) is possible.
-MqttClient createMqttClient(Uri url, String clientId) {
+MqttClient createMqttClient(Uri url, String clientId, {Set<String> pinnedCertificates = const {}}) {
   if (url.scheme != 'ws' && url.scheme != 'wss') {
     throw TransportException('browsers only support ws:// and wss:// brokers, not ${url.scheme}');
   }

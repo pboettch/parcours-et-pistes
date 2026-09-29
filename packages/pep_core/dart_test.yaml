@@ -1,6 +1,14 @@
 # Browser tests need sodium.js (sumo); fetch it with .claude/scripts/fetch_sodium_js.sh
 custom_html_template_path: test/web/template.html.tpl
+
+# The dev broker's TLS listeners use a test certificate. The VM tests pin it;
+# in the browser, certificate errors are ignored for these tests.
+override_platforms:
+  chrome:
+    settings:
+      arguments: --ignore-certificate-errors
+
 tags:
   broker:
     # Requires the local dev broker (.claude/scripts/broker.sh start)
-    skip: false
+    timeout: 2x
