@@ -45,8 +45,15 @@ class BaseLayer {
 
   static BaseLayer byId(String? id) => all.firstWhere((l) => l.id == id, orElse: () => ign);
 
-  List<Widget> build() => [
+  /// [reset]: reloads the tiles when it emits.
+  List<Widget> build({Stream<void>? reset}) => [
     for (final (url, maxNative) in tiles)
-      TileLayer(urlTemplate: url, maxNativeZoom: maxNative, maxZoom: 21, userAgentPackageName: _userAgent),
+      TileLayer(
+        urlTemplate: url,
+        maxNativeZoom: maxNative,
+        maxZoom: 21,
+        userAgentPackageName: _userAgent,
+        reset: reset,
+      ),
   ];
 }

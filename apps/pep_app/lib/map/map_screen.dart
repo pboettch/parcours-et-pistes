@@ -25,6 +25,10 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   final _map = MapController();
+
+  /// Reloads the tiles: they are sometimes not loaded after a programmatic
+  /// camera move made while the app starts (flutter_map 8).
+  final _tileReset = StreamController<void>.broadcast();
   var _ready = false;
   var _follow = true;
   String? _fittedProject, _fittedTrack;
@@ -45,6 +49,7 @@ class _MapScreenState extends State<MapScreen> {
   void dispose() {
     app.removeListener(_onApp);
     _clock?.cancel();
+    unawaited(_tileReset.close());
     super.dispose();
   }
 
@@ -60,6 +65,11 @@ class _MapScreenState extends State<MapScreen> {
   /// Fits the project's tracks when a project opens, the track when one gets
   /// selected, and follows the user otherwise (until the map is dragged).
   void _moveCamera() {
+    _moveCameraOnly();
+    Future<void>.delayed(const Duration(milliseconds: 300), () => _tileReset.isClosed ? null : _tileReset.add(null));
+  }
+
+  void _moveCameraOnly() {
     final s = app.session;
     if (s != null && _fittedProject != s.projectId) {
       _fittedProject = s.projectId;
@@ -129,14 +139,15 @@ class _MapScreenState extends State<MapScreen> {
               onTap: _onTap,
               onMapReady: () {
                 _ready = true;
-                _moveCamera();
+                // Not synchronously: the tile layer would miss the first camera move.
+                WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? _moveCamera() : null);
               },
               onPositionChanged: (_, hasGesture) {
                 if (hasGesture && _follow) setState(() => _follow = false);
               },
             ),
             children: [
-              ...app.layer.build(),
+              ...app.layer.build(reset: _tileReset.stream),
               if (s != null) ..._projectLayers(s, selected, runId),
               ..._myLayers(),
               Scalebar(alignment: Alignment.bottomLeft, padding: const EdgeInsets.fromLTRB(12, 0, 0, 28)),

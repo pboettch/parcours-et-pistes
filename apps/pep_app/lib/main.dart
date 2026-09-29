@@ -1,10 +1,14 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import 'map/map_screen.dart';
 import 'state/app_state.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Accessibility tree always on in the browser (screen readers, automated UI tests).
+  if (kIsWeb) SemanticsBinding.instance.ensureSemantics();
   final app = await AppState.load();
   runApp(PepApp(app: app));
 }
