@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:pep_core/pep_core.dart';
 import 'package:pep_core/src/model/json.dart';
@@ -12,12 +13,37 @@ void main() {
   late PepCrypto c;
   setUpAll(() async => c = await testCrypto());
 
-  test('ProjectMeta round trip', () {
-    final k = fastKdf(c);
-    final key = ProjectKey.derive(c, 'pw', k);
-    final m = ProjectMeta.decode(ProjectMeta(kdf: k, keyCheck: key.check).encode());
-    expect(m.keyCheck, key.check);
-    expect(m.kdf.salt, k.salt);
+  group('ProjectMeta', () {
+    const topic = 'pep/v1/x/meta';
+    late KdfParams k;
+    late ProjectKey key;
+    late Identity owner;
+    setUp(() {
+      k = fastKdf(c);
+      key = ProjectKey.derive(c, 'pw', k);
+      owner = Identity.generate(c);
+    });
+
+    test('signed round trip', () {
+      final data = ProjectMeta(kdf: k, keyCheck: key.check, rev: 2).seal(topic: topic, owner: owner);
+      final m = ProjectMeta.open(c, topic: topic, data: data, ownerKey: owner.publicKey);
+      expect(m.keyCheck, key.check);
+      expect(m.kdf.salt, k.salt);
+      expect(m.rev, 2);
+    });
+
+    test('rejects other signer, other topic, tampering', () {
+      final data = ProjectMeta(kdf: k, keyCheck: key.check, rev: 1).seal(topic: topic, owner: owner);
+      expect(() => ProjectMeta.open(c, topic: topic, data: data, ownerKey: Identity.generate(c).publicKey),
+          throwsA(isA<AuthorizationException>()));
+      expect(() => ProjectMeta.open(c, topic: 'pep/v1/y/meta', data: data, ownerKey: owner.publicKey),
+          throwsA(isA<AuthorizationException>()));
+      final t = Uint8List.fromList(data)..[data.length - 3] ^= 1;
+      expect(() => ProjectMeta.open(c, topic: topic, data: t, ownerKey: owner.publicKey),
+          throwsA(isA<PepException>()));
+      expect(() => ProjectMeta.open(c, topic: topic, data: Uint8List(10), ownerKey: owner.publicKey),
+          throwsA(isA<FormatPepException>()));
+    });
   });
 
   group('ProjectDoc', () {

@@ -27,3 +27,8 @@ class AuthorizationException extends PepException {
 class WrongPasswordException extends PepException {
   const WrongPasswordException() : super('wrong password');
 }
+
+/// No project (meta or project document) was found for the given id on the broker.
+class ProjectNotFoundException extends PepException {
+  const ProjectNotFoundException(super.message);
+}

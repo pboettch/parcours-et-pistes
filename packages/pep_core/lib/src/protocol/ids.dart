@@ -1,3 +1,4 @@
+import '../codec/bytes.dart';
 import '../crypto/pep_crypto.dart';
 import '../errors.dart';
 
@@ -14,6 +15,9 @@ String newUuid(PepCrypto c) {
   return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-'
       '${h.substring(16, 20)}-${h.substring(20)}';
 }
+
+/// Random track id (16 chars, topic-safe).
+String newTrackId(PepCrypto c) => b64u(c.randomBytes(12));
 
 bool isProjectId(String s) => _uuidRe.hasMatch(s);
 
