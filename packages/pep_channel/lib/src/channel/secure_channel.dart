@@ -706,8 +706,18 @@ class SecureChannel {
           break;
       }
     } on PepException catch (e) {
+      // An item that no longer decrypts (e.g. still under the key from before
+      // a password change) is no longer part of the channel: stop showing it.
+      if (e is DecryptionException && ref.kind == TopicKind.item) _hide(ref, topic);
       _emit(MessageRejected(topic, e));
     }
+  }
+
+  void _hide(TopicRef ref, String topic) {
+    final e = _entries[topic];
+    if (e?.item == null) return;
+    _entries[topic] = _Entry(e!.opened, null);
+    _emit(ItemRemoved(ref.collection!, ref.id!));
   }
 
   /// Metadata is signed by the current owner. Before the access list (and so

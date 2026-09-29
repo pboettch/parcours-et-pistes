@@ -405,6 +405,30 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
       await expectLater(join(o, bobId, password: 'pw-1'), throwsA(isA<WrongPasswordException>()));
     });
 
+    test('unlock after an interrupted password change shows nothing from the old key', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      await o.put('note', 'n', b('old'));
+      await a.put('pos', a.selfItemId(), b('p'));
+      await eventually(() => a.item('note', 'n') != null && a.items('pos').isNotEmpty);
+      // The owner's app publishes the new metadata, then dies before re-sealing.
+      final kdf = fastKdf(c);
+      final newKey = ProjectKey.derive(c, 'pw-2', kdf);
+      final t = h.transport();
+      await t.connect();
+      await t.publish(
+        o.topics.meta,
+        ChannelMeta(kdf: kdf, keyCheck: newKey.check, rev: 2).seal(topic: o.topics.meta, owner: ownerId),
+        retain: true,
+      );
+      await eventually(() => a.locked);
+      await a.unlock('pw-2');
+      expect(a.items('note'), isEmpty);
+      expect(a.items('pos'), isEmpty);
+      await eventually(() => events[a]!.whereType<ItemRemoved>().length >= 2);
+      await t.disconnect();
+    });
+
     test('password change from a fresh owner session covers every item', () async {
       final o = await create();
       final ids = [for (var i = 0; i < 5; i++) 'n$i'];
