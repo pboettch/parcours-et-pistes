@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pep_app (web)",
+      "runtimeExecutable": ".claude/scripts/app.sh",
+      "runtimeArgs": ["serve"],
+      "port": 8686
+    }
+  ]
+}
