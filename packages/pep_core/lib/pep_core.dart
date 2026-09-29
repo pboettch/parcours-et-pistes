@@ -17,3 +17,6 @@ export 'src/model/track_doc.dart';
 export 'src/protocol/ids.dart' show newUuid, isProjectId, isTopicId;
 export 'src/protocol/join_link.dart';
 export 'src/protocol/topics.dart';
+export 'src/transport/memory_transport.dart';
+export 'src/transport/mqtt5_transport.dart';
+export 'src/transport/transport.dart';

@@ -13,6 +13,7 @@ dependencies:
   meta: ^1.19.0
   mqtt5_client: ^5.0.0
   sodium: ^4.1.1+1
+  typed_data: ^1.4.0
   uuid: ^4.6.0
   xml: ^7.1.0
 dev_dependencies:
