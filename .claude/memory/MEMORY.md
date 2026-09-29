@@ -1,2 +1,2 @@
-- [GPX trail app project](project-gpx-trail-app.md) — Parcours et Pistes: encrypted RU/Man-Trailing trail sharing over MQTT, goals + core-lib decisions
+- [GPX trail app project](project-gpx-trail-app.md) — Parcours et Pistes: encrypted RU/MT trail sharing over MQTT; decisions, pep_core status (done), next = Flutter apps, gotchas
 - [Repo conventions](feedback-repo-conventions.md) — memories/Claude scripts live in repo `.claude/`, git-managed, commit often

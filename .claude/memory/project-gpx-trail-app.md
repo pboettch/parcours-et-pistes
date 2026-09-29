@@ -36,7 +36,12 @@ Small user base, but published on App Store and Play Store.
 - Join link: UUID + owner key fingerprint (+ optional broker) in URL fragment; password separate.
 - MQTT 5 (`mqtt5_client`) behind a pluggable `Transport` interface; positions use message expiry
   plus client-side TTL filter.
-- Topic layout `pep/v1/<uuid>/{meta,project,track/<id>,member/<id>,pos/<id>}`.
+- Topic layout `pep/v1/<uuid>/{meta,project,track/<id>,member/<id>,pos/<id>,sync/<nonce>}`.
+- Changed during implementation (see docs/DESIGN.md): `meta` is owner-signed + revisioned (else
+  anyone knowing the UUID could fake a password change); no track index in the project doc
+  (editors couldn't update an owner-signed index) — tracks discovered via retained topics,
+  deletion = signed tombstone; `join()` waits on a sync barrier (empty non-retained probe) so
+  state is complete; password change publishes new meta first.
 - Full design: `docs/DESIGN.md`. Conventions: [[feedback-repo-conventions]].
 
 **Spike results (2026-09-29):** Flutter SDK is user-local at `/home/pmp/devel/flutter` (Dart 3.13.4;
@@ -44,3 +49,14 @@ Small user base, but published on App Store and Play Store.
 sumo `sodium.js` via `dart_test.yaml` HTML template. Argon2id t=3/64 MiB: ~22 ms VM, ~74 ms Chromium →
 chosen as default KDF params. System mosquitto 2.1.2 installed; dev broker via `.claude/scripts/broker.sh`
 (ports 18883/18080) and retained-message expiry verified working.
+
+**Status (2026-09-29):** `packages/pep_core` phases 1–6 done and committed: 213 test runs green
+(VM + Chromium; memory broker + mosquitto TCP/TLS/WS/WSS/auth), ~96 % line coverage, `pep` CLI and
+`.claude/scripts/e2e.sh` pass. **Next: Flutter apps** (user wants to start them once the library is
+done). Open topics for later: RU-specific track info (user will detail), default production broker
++ wildcard-subscription restriction, background location in the apps, app deep-link domain.
+
+**Gotchas learned:** mosquitto ACLs accept denied subscriptions (silently filtered) but refuse denied
+QoS1 publishes with PUBACK 0x87; `archive`'s Inflate doesn't report corrupt streams (hence the u32
+length prefix); member ids are base64url and may start with `-` (CLI needs `--`); in dart2js use
+multiplication not `<<` for u32.

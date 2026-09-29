@@ -24,4 +24,6 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
 ## Dev commands
 - `source .claude/scripts/env.sh` — Flutter/Dart SDK on PATH (user-local in `/home/pmp/devel/flutter`).
 - `.claude/scripts/broker.sh start|stop|status` — local mosquitto (MQTT 18883, WS 18080).
-- `.claude/scripts/test.sh [args]` — `dart test` on VM + Chromium.
+- `.claude/scripts/test.sh [args]` — `dart test` on VM + Chromium (`-x broker` skips broker tests).
+- `.claude/scripts/e2e.sh` — end-to-end CLI scenario (owner + participant) on the dev broker.
+- `dart run pep_core:pep --help` (in `packages/pep_core`) — CLI for manual testing.
