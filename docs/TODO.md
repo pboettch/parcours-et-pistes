@@ -1,6 +1,11 @@
 # TODO — app layer
 
 Items that belong to the Flutter apps (the libraries already provide what they need).
+The web PoC (`apps/pep_app`) already covers: map-first screen with IGN / OSM Rando / OSM / aerial
+layers, own position (follow, share), tracks (cards, details, places with Maps/Waze), runs
+(create, designate the source, start/finish, dog path / progress / distance / corridors, simulated
+dog), participants (editors), identity export/import, join/create/invite (link copy).
+Still PoC-grade: storage unencrypted in the browser, French strings inline, no QR codes.
 
 ## Identity and devices
 - [ ] First start: generate the identity (`Identity.generate`), keep the seed in the platform's

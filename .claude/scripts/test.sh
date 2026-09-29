@@ -6,6 +6,13 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$root/.claude/scripts/env.sh"
 export CHROME_EXECUTABLE="${CHROME_EXECUTABLE:-/usr/bin/chromium}"
+# package:test 1.31 (pinned by Flutter's test_api) drops CHROME_EXECUTABLE when
+# dart_test.yaml overrides the chrome settings: provide "google-chrome" instead.
+if ! command -v google-chrome >/dev/null; then
+  shim="$(mktemp -d)"
+  ln -s "$CHROME_EXECUTABLE" "$shim/google-chrome"
+  export PATH="$shim:$PATH"
+fi
 packages=()
 while [[ ${1:-} == -P ]]; do packages+=("$2"); shift 2; done
 [[ ${#packages[@]} -gt 0 ]] || packages=(pep_content pep_channel pep_core)

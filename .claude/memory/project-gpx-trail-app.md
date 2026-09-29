@@ -71,13 +71,29 @@ editor); per-track visibility via restricted items (content key sealed per recip
 never in topics (per-channel pseudonyms); positions per device (`.device` suffix). Friends list,
 contact exchange and cross-device sync are app-layer → `docs/TODO.md`.
 
-**Status (2026-09-29):** libraries done and committed (now split into pep_channel/pep_content/pep_core): 213 test runs green
+**Status (2026-09-29, superseded by the runs/GUI paragraph below):** libraries done and committed (now split into pep_channel/pep_content/pep_core): 213 test runs green
 (VM + Chromium; memory broker + mosquitto TCP/TLS/WS/WSS/auth), ~96 % line coverage, `pep` CLI and
 `.claude/scripts/e2e.sh` pass. **Next: Flutter apps** (user wants to start them once the library is
 done). Open topics for later: RU-specific track info (user will detail), default production broker
 + wildcard-subscription restriction, background location in the apps, app deep-link domain.
 
-**Gotchas learned:** mosquitto ACLs accept denied subscriptions (silently filtered) but refuse denied
+**Runs, dog position, GUI (user decisions, 2026-09-30):** the dog's position = a member the
+project leader designates (official follower of the handler's group, changeable during the day;
+events have several competing dogs on several tracks); Tractive collars feed MQTT through an
+external service acting as a **bot member**. Implemented: `Run` (pep_content) + `run`/`trace`
+collections, `dogPath`/`runProgress` (pep_core), CLI `run`/`replay`. The official RU trail sheet
+(organizers' part beforehand + judge's part on a tablet during the trail, stored in the GPX, app
+generates printable documents) comes later — placeholders only (`TrailInfo`). GUI PoC is **web
+first**, map-first (current position + menu); layers IGN, OSM Rando, OSM, satellite.
+`apps/pep_app` exists (see CLAUDE.md); private example project seeded from the CCO site on the
+local broker ([[reference-cco-prototype]]; browser identity made editor via CLI).
+
+**Gotchas learned:** Flutter web in the Browser pane: debug (DDC) builds are slow/flaky → use the
+release `app.sh serve`; the pane caches `localhost` → open `127.0.0.1:8686/?v=N`; coordinate clicks
+get lost on the canvas → semantics are on (`ensureSemantics`), click via `find` refs; flutter_map 8
+tile layer can miss a programmatic camera move at startup → `reset` stream after moves.
+Workspace + Flutter: Flutter pins `test_api`, so the packages use `test: ^1.25.0`; CI uses the
+Flutter SDK.  mosquitto ACLs accept denied subscriptions (silently filtered) but refuse denied
 QoS1 publishes with PUBACK 0x87; `archive`'s Inflate doesn't report corrupt streams (hence the u32
 length prefix); member ids are base64url and may start with `-` (CLI needs `--`); in dart2js use
 multiplication not `<<` for u32.
