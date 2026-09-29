@@ -53,23 +53,61 @@ On the web, libsodium runs as `sodium.js` (sumo build, WebAssembly): Argon2id at
 parameters takes ~75 ms in Chromium, ~20 ms on the Dart VM (2026 desktop hardware).
 
 ## Identities, roles, trust
-- Each device generates an Ed25519 identity; the 32-byte seed is kept in secure storage.
+- **One identity per user**, an Ed25519 key pair; the member id (unpadded base64url of the
+  public key) is project-independent. The 32-byte seed is kept in secure storage and **copied to
+  the user's other devices** with `IdentityBackup` (Argon2id + XChaCha20-Poly1305 under a
+  passphrase, ~130 characters, QR-friendly). A lost device means the identity must be considered
+  compromised: the user creates a new one and is re-added by friends and projects.
+- `fingerprintOf(memberId)`: 80 bits of SHA-256 as `XXXX-XXXX-XXXX-XXXX` (Crockford base32),
+  for people to compare when adding each other.
 - **Owner**: the project creator. Signs `meta` and the access list.
 - **Editors**: member ids listed in the access list.
 - **Participants**: anyone holding the password.
 - What each may write is set per collection by its **writer policy** in the access list:
   `owner`, `editors` (owner + editors) or `self` (any member, only the item whose id is their
   member id).
-- The **join link** carries the owner id; it is the trust anchor. `meta` and the access list
-  must be signed by exactly that key.
+- The **join link** carries an owner id; it is the trust anchor. The access list holds the
+  **ownership chain** (creator first; every later owner attested by the previous one) and must be
+  signed by its last entry, the current owner; `meta` too. Clients verify the chain from the
+  pinned key onwards.
+
+### Ownership transfer
+1. The owner publishes the access list with an `offer`: the next chain link, i.e. their
+   signature over `"pep-owner-v1" | lp16(channel id) | u32 index | new owner public key`.
+2. The designated member accepts: publishes the access list with the chain extended by that link
+   (the former owner becomes an **editor**, the offer is removed), signed with their own key;
+   then the metadata (signed by them); then re-signs the items of `owner` collections.
+3. Clients accept an access list only if its chain extends the one they know (ownership never
+   moves backwards). Links issued before the transfer keep working (their key is in the chain).
+
+### Member pseudonyms and devices
+Items of `self` collections are stored under a **pseudonym**, never the member id:
+`b64u(BLAKE2b-128(key = pseudonym key, "pep-self-v1" | member public key))`, the pseudonym key
+being subkey 3 of the channel master key. Without the password, topics cannot be linked to
+members, nor one member across projects. A `.device` suffix (`[A-Za-z0-9_-]{1,32}`) gives each
+device of a user its own item (e.g. positions). Pseudonyms change with the password.
+
+### Restricted items (per-track visibility)
+`put(..., recipients:)` (facade: `publishTrack(visibleTo:)`) encrypts the body with a fresh
+content key and seals that key for each recipient (libsodium sealed box to the X25519 form of
+their Ed25519 key). The owner and the publisher are always added. Envelope flag bit2 marks the
+body as a restricted block:
+```text
+u8 count | count × (recipient public key[32] | sealed content key[80])
+| nonce[24] | XChaCha20-Poly1305(content key, ad = topic, flags u8 | payload)
+```
+Other members see that the item exists and who may read it, not its content. Re-sealing
+(password change, ownership transfer) keeps the block as is, so no one needs to read it.
+Changing the recipients = publishing a new revision; members dropped from the list lose the item
+(but keep what they already downloaded).
 
 ## Collections of Parcours et Pistes (`PepCollections`)
 | Collection | Item id | Writers | TTL | Body (`pep_content`) |
 |---|---|---|---|---|
 | `info` | `project` | owner | — | `ProjectInfo` JSON: name, desc, disc (`ru`/`mt`), extra |
 | `track` | random | editors | — | the GPX document (UTF-8), see *Track content* |
-| `member` | member id | self | — | `MemberProfile` JSON: name |
-| `pos` | member id | self | project setting (default 30 min) | `Position` JSON: lat, lon, ts (fix time), alt?, acc?, hdg?, spd? |
+| `member` | member pseudonym | self | — | `MemberProfile` JSON: name |
+| `pos` | member pseudonym [`.device`] | self | project setting (default 30 min) | `Position` JSON: lat, lon, ts (fix time), alt?, acc?, hdg?, spd? |
 
 ## Topic layout
 Base `pep/v1` (configurable). All messages are retained except `sync` probes.
@@ -101,8 +139,9 @@ Binding the topic both as AD and in the signature prevents moving a payload to a
 or project. `lp16` = u16 big-endian length prefix. The header gives the channel what it needs
 (ordering, tombstones, expiry) without reading the body.
 
-**Access list** body (JSON): `{"v":1, "owner":id, "editors":[ids],
-"collections":{name:{"w":"owner"|"editors"|"self", "ttl":seconds?}}}`.
+**Access list** body (JSON): `{"v":1, "owners":[{"id":creator}, {"id":next, "sig":b64u}, …],
+"editors":[ids], "collections":{name:{"w":"owner"|"editors"|"self", "ttl":seconds?}},
+"offer":{"id":member, "sig":b64u}?}`.
 
 Content bodies are defined by `pep_content` (see the collections table); JSON documents carry
 `"v":1`, unknown fields are preserved, higher versions are rejected.
@@ -140,8 +179,12 @@ as is; id, revision, publish time and deletion are channel data.
   state. `join` does this before returning.
 - **Password change** (owner): publish new `meta` (rev+1) first — other clients lock and ask
   for the new password — then re-seal the access list and every item and tombstone the owner
-  may write (re-signed by the owner, rev+1); clear ephemeral items, other members' `self`
-  items and pending (rejected) messages.
+  may write (re-signed by the owner, rev+1; restricted blocks unchanged); move the owner's own
+  `self` items to their new pseudonyms; clear ephemeral items, other members' `self` items and
+  pending (rejected) messages.
+- **Joining**: metadata may be used unverified to derive the key (its signer, the current
+  owner, is only known once the access list is decrypted); it must then verify against the
+  owner at the end of the chain, or the join fails.
 - **Delete** (owner): clear all retained topics (meta last).
 - Items are discovered from their own retained topics; there is no index, so editors can
   publish without the owner.
@@ -172,11 +215,13 @@ subscribe) surface as `TransportException`.
 ## Threat model (summary)
 | Attacker | Can | Cannot |
 |---|---|---|
-| Broker admin / network observer (TLS off) | see topic names, sizes, timing, KDF params; delete or replay retained messages | read any content; forge messages |
+| Broker admin / network observer (TLS off) | see topic names (channel UUIDs, collections, pseudonyms), sizes, timing, KDF params; delete or replay retained messages | read any content; learn member ids or link members across projects; forge messages |
 | Knows the UUID, not the password | delete/replace retained messages (vandalism), replay old ciphertexts to new joiners | read or forge; fake a password change (meta is owner-signed) |
-| Holds the password | read everything; write `self` items for themselves | forge the access list, owner/editor items, or other members' items |
+| Holds the password | read everything not restricted; write `self` items for themselves | read restricted items they are not a recipient of; forge the access list, owner/editor items, or other members' items |
 | Editor | write/delete `editors` collections (tracks) | change the access list or password |
 
-Known limitations: deletion/vandalism by UUID holders needs broker-side ACLs; a new joiner can
+Known limitations: a former owner who still knows the password can present new joiners that use
+an *old* join link (pinning a key up to theirs) with a rolled-back access list — share links
+issued after a transfer; deletion/vandalism by UUID holders needs broker-side ACLs; a new joiner can
 be served an old (replayed) revision; after a password change, former members keep what they
 already downloaded; items re-sealed during a password change are attributed to the owner.

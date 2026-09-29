@@ -24,5 +24,5 @@ class Project {
   /// How long a shared position stays visible after being published.
   Duration get positionTtl => acl.collections[PepCollections.position]?.ttl ?? PepCollections.defaultPositionTtl;
 
-  bool canEditTracks(String memberId) => acl.canWrite(memberId, PepCollections.track, '-');
+  bool canEditTracks(String memberId) => acl.canWrite(memberId, PepCollections.track, '-', isSelfItem: (_, _) => false);
 }

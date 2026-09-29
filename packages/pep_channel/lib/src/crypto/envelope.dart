@@ -10,7 +10,14 @@ import 'pep_crypto.dart';
 
 /// Content of an opened envelope (signature already verified).
 class Opened {
-  Opened({required this.signer, required this.rev, required this.time, required this.deleted, required this.body});
+  Opened({
+    required this.signer,
+    required this.rev,
+    required this.time,
+    required this.deleted,
+    required this.body,
+    this.restricted = false,
+  });
 
   /// Public key of the member who signed the payload.
   final Uint8List signer;
@@ -24,6 +31,9 @@ class Opened {
   /// Tombstone: the item was deleted (empty body).
   final bool deleted;
 
+  /// The body is a restricted block (readable only by listed recipients).
+  final bool restricted;
+
   /// Decompressed body (opaque to the channel).
   final Uint8List body;
 
@@ -35,7 +45,7 @@ class Opened {
 /// ```text
 /// "PEP1" | version u8 | nonce[24] | XChaCha20-Poly1305(key, ad = topic, plaintext)
 /// plaintext = header | signer public key[32] | signature[64] | body
-/// header    = flags u8 (bit0 deflated, bit1 deleted) | rev u32 | time u64 (ms, UTC)
+/// header    = flags u8 (bit0 deflated, bit1 deleted, bit2 restricted) | rev u32 | time u64 (ms, UTC)
 /// signature = Ed25519("pep-sig-v1" | lp16(topic) | header | body)
 /// ```
 ///
@@ -52,6 +62,7 @@ class Envelope {
   static const version = 1;
   static const _flagDeflated = 0x01;
   static const _flagDeleted = 0x02;
+  static const _flagRestricted = 0x04;
   static const maxRev = 0xffffffff;
   static const _nonceBytes = 24;
 
@@ -63,10 +74,12 @@ class Envelope {
     required int rev,
     required DateTime time,
     bool deleted = false,
+    bool restricted = false,
     bool compress = true,
   }) {
     if (rev < 0 || rev > maxRev) throw ArgumentError.value(rev, 'rev');
-    var flags = deleted ? _flagDeleted : 0;
+    var flags = (deleted ? _flagDeleted : 0) | (restricted ? _flagRestricted : 0);
+    if (restricted) compress = false; // ciphertext does not compress
     var payload = body;
     if (compress && body.length > 64) {
       final z = deflate(body);
@@ -139,6 +152,7 @@ class Envelope {
       rev: rev,
       time: DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true),
       deleted: deleted,
+      restricted: (flags & _flagRestricted) != 0,
       body: body,
     );
   }

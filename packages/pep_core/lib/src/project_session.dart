@@ -19,7 +19,7 @@ import 'track.dart';
 /// content. Items of collections it does not know (content types added by
 /// newer app versions) are ignored.
 class ProjectSession {
-  ProjectSession._(this.channel) {
+  ProjectSession._(this.channel, this.deviceId) {
     _sub = channel.events.listen(_onChannelEvent);
   }
 
@@ -38,6 +38,7 @@ class ProjectSession {
     KdfParams? kdf,
     DateTime Function()? clock,
     Duration pruneInterval = const Duration(seconds: 15),
+    String? deviceId,
   }) async {
     final channel = await SecureChannel.create(
       crypto: crypto,
@@ -56,7 +57,7 @@ class ProjectSession {
       PepCollections.infoId,
       ProjectInfo(name: name, description: description, discipline: discipline).encode(),
     );
-    return ProjectSession._(channel);
+    return ProjectSession._(channel, deviceId);
   }
 
   /// Joins an existing project from its invitation [link] and [password].
@@ -73,6 +74,7 @@ class ProjectSession {
     Duration timeout = const Duration(seconds: 10),
     DateTime Function()? clock,
     Duration pruneInterval = const Duration(seconds: 15),
+    String? deviceId,
   }) async {
     final channel = await SecureChannel.join(
       crypto: crypto,
@@ -84,7 +86,7 @@ class ProjectSession {
       clock: clock,
       pruneInterval: pruneInterval,
     );
-    final s = ProjectSession._(channel);
+    final s = ProjectSession._(channel, deviceId);
     if (s._projectOrNull == null) {
       await s.close(clearPosition: false);
       throw const ChannelNotFoundException('no valid project information in the channel');
@@ -94,6 +96,15 @@ class ProjectSession {
 
   /// The underlying secure channel (for advanced use and tests).
   final SecureChannel channel;
+
+  /// This installation's device id (stable, app-generated, `[A-Za-z0-9_-]{1,32}`),
+  /// so that several devices of one user share positions side by side. Null:
+  /// one position per member.
+  final String? deviceId;
+
+  /// Member id by self item id (pseudonym), to name removed items.
+  final _selfOwners = <String, String>{};
+  var _offerNotified = false;
 
   late final StreamSubscription<ch.ChannelEvent> _sub;
   final _events = StreamController<SessionEvent>.broadcast();
@@ -128,18 +139,31 @@ class ProjectSession {
   /// Tracks by id (tracks with invalid GPX are left out).
   Map<String, Track> get tracks => _all(PepCollections.track, _track);
 
-  Map<String, MemberProfile> get members => _all(PepCollections.member, (i) => _decode(i, MemberProfile.decode));
+  /// Member profiles by member id.
+  Map<String, MemberProfile> get members => _bySigner(PepCollections.member, MemberProfile.decode);
 
-  /// Fresh positions by member id.
-  Map<String, Position> get positions => _all(PepCollections.position, (i) => _decode(i, Position.decode));
+  /// Fresh positions by member id (the most recent one when a member shares
+  /// from several devices).
+  Map<String, Position> get positions => _bySigner(PepCollections.position, Position.decode);
+
+  /// Whether the owner offered the project ownership to this member.
+  bool get ownershipOfferedToMe => channel.ownershipOfferedToMe;
 
   // -------------------------------------------------------------- actions
 
   /// Publishes a new track, or a new revision of track [id]. Everything about
   /// the track (name, objects, custom sections) is in the [gpx] document.
-  Future<Track> publishTrack({String? id, required String gpx}) async {
+  ///
+  /// With [visibleTo] (member ids), only those members — plus the owner and
+  /// the publisher — can see the track; `null` = every member.
+  Future<Track> publishTrack({String? id, required String gpx, Set<String>? visibleTo}) async {
     final parsed = Gpx.parse(gpx); // reject invalid GPX before publishing
-    final item = await channel.put(PepCollections.track, id ?? channel.generateItemId(), utf8Bytes(gpx));
+    final item = await channel.put(
+      PepCollections.track,
+      id ?? channel.generateItemId(),
+      utf8Bytes(gpx),
+      recipients: visibleTo,
+    );
     return Track(item, parsed: parsed);
   }
 
@@ -164,14 +188,23 @@ class ProjectSession {
 
   Future<void> removeEditor(String memberId) => channel.removeEditor(memberId);
 
+  /// Owner only: offers the project ownership to [memberId] (who must accept).
+  Future<void> offerOwnership(String memberId) => channel.offerOwnership(memberId);
+
+  Future<void> cancelOwnershipOffer() => channel.cancelOwnershipOffer();
+
+  /// Takes over the ownership offered to this member (see [OwnershipOffered]);
+  /// the former owner becomes an editor.
+  Future<void> acceptOwnership() => channel.acceptOwnership();
+
   Future<void> publishPosition(Position position) async {
-    await channel.put(PepCollections.position, memberId, position.encode());
+    await channel.put(PepCollections.position, channel.selfItemId(device: deviceId), position.encode());
   }
 
-  Future<void> clearPosition() => channel.delete(PepCollections.position, memberId);
+  Future<void> clearPosition() => channel.delete(PepCollections.position, channel.selfItemId(device: deviceId));
 
   Future<void> setMemberName(String name) async {
-    await channel.put(PepCollections.member, memberId, MemberProfile(name: name).encode());
+    await channel.put(PepCollections.member, channel.selfItemId(), MemberProfile(name: name).encode());
   }
 
   /// Owner only; see [SecureChannel.changePassword].
@@ -206,6 +239,17 @@ class ProjectSession {
     if (!_events.isClosed) _events.add(e);
   }
 
+  /// Items of a `self` collection by member id (latest publish time wins).
+  Map<String, T> _bySigner<T>(String collection, T Function(Uint8List) decode) {
+    final latest = <String, ChannelItem>{};
+    for (final i in channel.items(collection).values) {
+      if (_decode(i, decode) == null) continue;
+      final cur = latest[i.signerId];
+      if (cur == null || i.time.isAfter(cur.time)) latest[i.signerId] = i;
+    }
+    return Map.unmodifiable({for (final e in latest.entries) e.key: _decode(e.value, decode) as T});
+  }
+
   Map<String, T> _all<T>(String collection, T? Function(ChannelItem) decode) =>
       Map.unmodifiable({for (final i in channel.items(collection).values) i.id: ?decode(i)});
 
@@ -236,6 +280,9 @@ class ProjectSession {
     switch (e) {
       case ch.AclUpdated():
         if (_projectOrNull case final p?) _emit(ProjectUpdated(p));
+        final offered = channel.ownershipOfferedToMe;
+        if (offered && !_offerNotified) _emit(OwnershipOffered(channel.ownerId));
+        _offerNotified = offered;
       case ch.ItemUpdated(:final item):
         _onItem(item);
       case ch.ItemRemoved(:final collection, :final id):
@@ -243,9 +290,10 @@ class ProjectSession {
           case PepCollections.track:
             _emit(TrackRemoved(id));
           case PepCollections.member:
-            _emit(MemberRemoved(id));
+            if (_selfOwners[id] case final m?) _emit(MemberRemoved(m));
           case PepCollections.position:
-            _emit(PositionRemoved(id));
+            // Another device of the same member may still share a position.
+            if (_selfOwners[id] case final m? when !positions.containsKey(m)) _emit(PositionRemoved(m));
         }
       case ch.PasswordChanged():
         _emit(const PasswordChanged());
@@ -258,6 +306,9 @@ class ProjectSession {
 
   void _onItem(ChannelItem item) {
     final topic = channel.topics.item(item.collection, item.id);
+    if (item.collection == PepCollections.member || item.collection == PepCollections.position) {
+      _selfOwners[item.id] = item.signerId;
+    }
     SessionEvent? event;
     switch (item.collection) {
       case PepCollections.info:
@@ -268,10 +319,10 @@ class ProjectSession {
         if (t != null) event = TrackUpdated(t);
       case PepCollections.member:
         final m = _decode(item, MemberProfile.decode);
-        if (m != null) event = MemberUpdated(item.id, m);
+        if (m != null) event = MemberUpdated(item.signerId, m);
       case PepCollections.position:
         final p = _decode(item, Position.decode);
-        if (p != null) event = PositionUpdated(item.id, p);
+        if (p != null) event = PositionUpdated(item.signerId, p);
       default:
         return; // content type unknown to this version: ignored
     }

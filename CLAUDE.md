@@ -15,7 +15,8 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
   New content type = data type in pep_content + collection in PepCollections.
 - `apps/` — Flutter apps (later).
 - `tools/broker/` — development MQTT 5 broker setup.
-- `docs/DESIGN.md` — architecture, crypto, topic layout, phases.
+- `docs/DESIGN.md` — architecture, crypto, protocol, threat model.
+- `docs/TODO.md` — app-layer TODOs (friends, device sync, UI flows).
 - `.claude/memory/` — Claude memories (versioned; `~/.claude/projects/...-parcours-et-pistes/memory`
   is a symlink here). Index: `.claude/memory/MEMORY.md`.
 - `.claude/scripts/` — helper scripts for Claude/dev tasks.

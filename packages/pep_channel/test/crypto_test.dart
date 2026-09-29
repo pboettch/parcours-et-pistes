@@ -72,6 +72,34 @@ void main() {
       expect(a.id, matches(RegExp(r'^[A-Za-z0-9_-]{43}$')));
     });
 
+    test('fingerprint: stable, 4 groups of 4 Crockford base32 characters', () {
+      final a = Identity.generate(c);
+      expect(a.fingerprint, matches(RegExp(r'^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$')));
+      expect(fingerprintOf(a.id), a.fingerprint);
+      expect(Identity.fromSeed(c, a.exportSeed()).fingerprint, a.fingerprint);
+      expect(Identity.generate(c).fingerprint, isNot(a.fingerprint));
+    });
+
+    test('sealed messages for a member', () {
+      final a = Identity.generate(c), b = Identity.generate(c);
+      final sealed = Identity.sealFor(c, a.id, utf8Bytes('key'));
+      expect(a.openSealed(sealed), utf8Bytes('key'));
+      expect(b.openSealed(sealed), isNull);
+      expect(a.openSealed(Uint8List.fromList(sealed)..[10] ^= 1), isNull);
+    });
+
+    test('identity backup round trip', () {
+      final a = Identity.generate(c);
+      final backup = IdentityBackup.export(c, a, 'correct horse', kdf: fastKdf(c));
+      expect(backup, startsWith(IdentityBackup.prefix));
+      expect(backup.length, lessThan(160), reason: 'fits a QR code easily');
+      expect(IdentityBackup.import(c, backup, 'correct horse').id, a.id);
+      expect(() => IdentityBackup.import(c, backup, 'wrong'), throwsA(isA<WrongPasswordException>()));
+      final tampered = backup.substring(0, backup.length - 2) + (backup.endsWith('A') ? 'BB' : 'AA');
+      expect(() => IdentityBackup.import(c, tampered, 'correct horse'), throwsA(isA<PepException>()));
+      expect(() => IdentityBackup.import(c, 'hello', 'x'), throwsA(isA<FormatPepException>()));
+    });
+
     test('sign / verify', () {
       final a = Identity.generate(c);
       final msg = Uint8List.fromList([1, 2, 3]);

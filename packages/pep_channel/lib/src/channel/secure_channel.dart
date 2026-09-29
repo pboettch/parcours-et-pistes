@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import '../codec/bytes.dart';
+import '../codec/compression.dart';
 import '../crypto/envelope.dart';
 import '../crypto/identity.dart';
 import '../crypto/kdf.dart';
@@ -16,18 +17,24 @@ import 'events.dart';
 import 'item.dart';
 import 'meta.dart';
 
-/// Latest accepted revision of an item (live or tombstone).
+/// Latest accepted revision of an item topic.
 class _Entry {
-  _Entry(this.rev, this.time, this.item);
+  _Entry(this.opened, this.item);
 
-  final int rev;
-  final DateTime time;
+  /// The verified envelope content (raw body; restricted blocks still sealed).
+  final Opened opened;
 
-  /// Null for tombstones.
+  /// The item as visible to this member; null for tombstones, expired items
+  /// and restricted items this member may not read.
   final ChannelItem? item;
 
-  bool newerThan(int r, DateTime t) => rev > r || (rev == r && time.isAfter(t));
+  int get rev => opened.rev;
+  DateTime get time => opened.time;
+
+  bool olderThan(Opened o) => o.rev > rev || (o.rev == rev && o.time.isAfter(time));
 }
+
+final _deviceRe = RegExp(r'^[A-Za-z0-9_-]{1,32}$');
 
 /// An end-to-end encrypted, signed and access-controlled channel over a
 /// [Transport]: collections of opaque items, kept in sync with the broker.
@@ -37,14 +44,18 @@ class _Entry {
 /// reported as [MessageRejected]. Items carry a revision and a publish time in
 /// the signed envelope header: older revisions are ignored, deletions are
 /// signed tombstones, and items of ephemeral collections expire after the
-/// collection's TTL. The channel never interprets item bodies.
+/// collection's TTL. Items can be restricted to a set of recipients (see
+/// [put]). The channel never interprets item bodies.
+///
+/// Member ids never appear in topics: `self` items are stored under
+/// per-channel pseudonyms ([selfItemId]) derived from the channel key.
 class SecureChannel {
   SecureChannel._({
     required PepCrypto crypto,
     required Transport transport,
     required Identity identity,
     required this.topics,
-    required this.ownerId,
+    required String anchorId,
     required this.linkBroker,
     required DateTime Function()? clock,
     required Duration pruneInterval,
@@ -52,9 +63,11 @@ class SecureChannel {
        _env = Envelope(crypto),
        _transport = transport,
        _me = identity,
-       _ownerKey = publicKeyFromId(ownerId),
+       _anchorId = anchorId,
        _clock = clock ?? DateTime.now,
-       _pruneInterval = pruneInterval;
+       _pruneInterval = pruneInterval {
+    publicKeyFromId(anchorId);
+  }
 
   /// Creates a new channel owned by [identity] with the given [collections].
   static Future<SecureChannel> create({
@@ -76,15 +89,15 @@ class SecureChannel {
       transport: transport,
       identity: identity,
       topics: ChannelTopics(newUuid(crypto), base: topicBase),
-      ownerId: identity.id,
+      anchorId: identity.id,
       linkBroker: linkBroker,
       clock: clock,
       pruneInterval: pruneInterval,
     );
     final params = kdf ?? KdfParams.generate(crypto);
     s._key = ProjectKey.derive(crypto, password, params);
+    await s._publishAcl(ChannelAcl.initial(ownerId: identity.id, editors: editors, collections: collections));
     await s._publishMeta(ChannelMeta(kdf: params, keyCheck: s._key!.check, rev: 1));
-    await s._publishAcl(ChannelAcl(ownerId: identity.id, editors: editors, collections: collections));
     await s._start();
     return s;
   }
@@ -93,8 +106,9 @@ class SecureChannel {
   ///
   /// Returns once all retained items have been received (sync barrier).
   /// Throws [WrongPasswordException] for a wrong password and
-  /// [ChannelNotFoundException] when no metadata/access list signed by the
-  /// owner named in the link arrives within [timeout].
+  /// [ChannelNotFoundException] when no metadata and access list signed by
+  /// the owner (the link's owner or a successor in the ownership chain)
+  /// arrive within [timeout].
   static Future<SecureChannel> join({
     required PepCrypto crypto,
     required Transport transport,
@@ -111,7 +125,7 @@ class SecureChannel {
       transport: transport,
       identity: identity,
       topics: ChannelTopics(link.channelId, base: link.topicBase),
-      ownerId: link.ownerId,
+      anchorId: link.ownerId,
       linkBroker: link.broker,
       clock: clock,
       pruneInterval: pruneInterval,
@@ -130,6 +144,7 @@ class SecureChannel {
           onTimeout: () => throw const ChannelNotFoundException('no valid access list on the broker'),
         );
       }
+      if (!s._metaVerified) throw const ChannelNotFoundException('channel metadata not signed by the owner');
       return s;
     } catch (_) {
       await s.close(clearEphemeral: false);
@@ -141,20 +156,22 @@ class SecureChannel {
   final Envelope _env;
   final Transport _transport;
   final Identity _me;
-  final Uint8List _ownerKey;
   final DateTime Function() _clock;
   final Duration _pruneInterval;
 
-  final ChannelTopics topics;
+  /// Trusted owner key from the join link (or the creator): the ownership
+  /// chain is verified from this key onwards.
+  final String _anchorId;
 
-  /// Member id of the owner (trust anchor from the join link).
-  final String ownerId;
+  final ChannelTopics topics;
 
   /// Broker URL embedded in generated join links (null = app default broker).
   final String? linkBroker;
 
   ProjectKey? _key;
   ChannelMeta? _meta;
+  var _metaVerified = false;
+  Uint8List? _metaAcceptedRaw;
   ChannelAcl? _acl;
   (int, DateTime)? _aclVersion;
 
@@ -171,6 +188,7 @@ class SecureChannel {
   /// Ephemeral items published by this session and not cleared yet.
   final _ownEphemeral = <String>{};
 
+  final _pseudonyms = <String, String>{};
   final _syncWaiters = <String, Completer<void>>{};
   final _metaArrived = Completer<void>();
   final _aclArrived = Completer<void>();
@@ -186,6 +204,9 @@ class SecureChannel {
   /// This device's member id.
   String get memberId => _me.id;
 
+  /// Current owner (last entry of the verified ownership chain).
+  String get ownerId => _acl?.ownerId ?? _anchorId;
+
   bool get isOwner => _me.id == ownerId;
 
   /// True after the owner changed the password, until [unlock] succeeds.
@@ -198,15 +219,33 @@ class SecureChannel {
   /// Revision of the current access list.
   int get aclRev => _aclVersion?.$1 ?? 0;
 
+  /// Join link for this channel, pinning the current owner.
   JoinLink get joinLink => JoinLink(channelId: channelId, ownerId: ownerId, broker: linkBroker, topicBase: topics.base);
+
+  /// Whether the current owner offered the ownership to this member.
+  bool get ownershipOfferedToMe => !locked && _acl?.offer?.memberId == _me.id && acl.offerValid(_c, channelId);
 
   /// A new random item id (16 chars, topic-safe).
   String generateItemId() => newItemId(_c);
 
-  /// Whether this member may currently publish item [id] of [collection].
-  bool canWrite(String collection, String id) => !locked && _acl != null && acl.canWrite(_me.id, collection, id);
+  /// Topic id of this member's item in `self` collections, optionally per
+  /// [device] (e.g. positions of several devices of one user).
+  String selfItemId({String? device}) => selfItemIdOf(_me.id, device: device);
 
-  /// Live items of [collection] by id (expired ephemeral items filtered out).
+  /// Topic id of [memberId]'s item in `self` collections. It is a pseudonym
+  /// derived from the channel key: member ids never appear in topics.
+  String selfItemIdOf(String memberId, {String? device}) {
+    final p = _pseudonym(memberId);
+    if (device == null) return p;
+    if (!_deviceRe.hasMatch(device)) throw FormatPepException('invalid device id "$device"');
+    return '$p.$device';
+  }
+
+  /// Whether this member may currently publish item [id] of [collection].
+  bool canWrite(String collection, String id) => !locked && _acl != null && _canWrite(_me.id, collection, id);
+
+  /// Live items of [collection] readable by this member, by id (expired
+  /// ephemeral items filtered out).
   Map<String, ChannelItem> items(String collection) {
     final now = _now();
     return Map.unmodifiable({
@@ -223,10 +262,22 @@ class SecureChannel {
   // -------------------------------------------------------------- actions
 
   /// Publishes a new revision of item [id] in [collection]. Returns it.
-  Future<ChannelItem> put(String collection, String id, Uint8List body) async {
+  ///
+  /// With [recipients], the body is encrypted with a fresh key that is sealed
+  /// individually for each recipient (plus the owner and this member, always
+  /// added): other members see that the item exists, but cannot read it.
+  Future<ChannelItem> put(String collection, String id, Uint8List body, {Set<String>? recipients}) async {
     final policy = _requireWrite(collection, id);
     final topic = topics.item(collection, id);
-    final data = _seal(topic, body, rev: _nextRev(topic));
+    recipients?.forEach(publicKeyFromId);
+    final data = recipients == null
+        ? _seal(topic, body, rev: _nextRev(topic))
+        : _seal(
+            topic,
+            _restrict(topic, body, {...recipients, ownerId, _me.id}),
+            rev: _nextRev(topic),
+            restricted: true,
+          );
     await _publish(topic, data, expiry: policy.ttl);
     if (policy.ephemeral) _ownEphemeral.add(topic);
     return _entries[topic]!.item!;
@@ -258,13 +309,52 @@ class SecureChannel {
 
   Future<void> removeEditor(String memberId) => updateAcl(editors: {...acl.editors}..remove(memberId));
 
+  /// Owner only: offers the ownership to [memberId], who takes over with
+  /// [acceptOwnership]. The offer can be withdrawn with [cancelOwnershipOffer].
+  Future<void> offerOwnership(String memberId) async {
+    _requireOwner();
+    publicKeyFromId(memberId);
+    if (memberId == _me.id) throw ArgumentError('cannot offer the ownership to yourself');
+    final sig = _me.sign(OwnerLink.toSign(channelId, acl.owners.length, memberId));
+    await _publishAcl(acl.copyWith(offer: OwnerLink(memberId, sig)));
+  }
+
+  Future<void> cancelOwnershipOffer() async {
+    _requireOwner();
+    await _publishAcl(acl.copyWith(clearOffer: true));
+  }
+
+  /// Takes over the ownership offered to this member: extends the ownership
+  /// chain, makes the former owner an editor, re-publishes the metadata and
+  /// re-signs the items only the owner may write.
+  Future<void> acceptOwnership() async {
+    _requireUnlocked();
+    if (!ownershipOfferedToMe) throw const AuthorizationException('no ownership offer for this member');
+    final old = acl;
+    await _publishAcl(
+      old.copyWith(
+        owners: [...old.owners, old.offer!],
+        editors: {...old.editors, old.ownerId}..remove(_me.id),
+        clearOffer: true,
+      ),
+    );
+    await _publishMeta(ChannelMeta(kdf: _meta!.kdf, keyCheck: _meta!.keyCheck, rev: _meta!.rev + 1));
+    for (final MapEntry(key: topic, value: e) in {..._entries}.entries) {
+      final ref = topics.parse(topic)!;
+      if (acl.collections[ref.collection]?.writers == Writers.owner && e.opened.signerId != _me.id) {
+        await _publish(topic, _reseal(topic, e));
+      }
+    }
+  }
+
   /// Owner only: changes the channel password.
   ///
   /// Publishes the new metadata first (other sessions lock until [unlock]),
   /// then re-encrypts under the new key the access list and every item and
-  /// tombstone the owner may write (re-signed by the owner, revision + 1).
-  /// Items the owner may not write (other members' `self` items), ephemeral
-  /// items and rejected messages are cleared from the broker.
+  /// tombstone the owner may write (re-signed by the owner, revision + 1;
+  /// restricted items stay sealed for their recipients). The owner's own
+  /// `self` items move to their new pseudonyms. Other members' `self` items,
+  /// ephemeral items and rejected messages are cleared from the broker.
   Future<void> changePassword(String newPassword, {KdfParams? kdf}) async {
     _requireOwner();
     final params = kdf ?? KdfParams.generate(_c);
@@ -273,19 +363,30 @@ class SecureChannel {
     final entries = {..._entries};
     final pending = {..._pending};
     final currentAcl = acl;
+    final myPseudonym = _pseudonym(_me.id);
+    bool mine(String itemId) => itemId == myPseudonym || itemId.startsWith('$myPseudonym.');
 
     _key!.dispose();
     _key = newKey;
+    _pseudonyms.clear();
     await _publishMeta(meta);
     await _publishAcl(currentAcl);
     for (final MapEntry(key: topic, value: e) in entries.entries) {
       final ref = topics.parse(topic)!;
       final policy = currentAcl.collections[ref.collection];
-      if (policy == null || policy.ephemeral || !currentAcl.canWrite(_me.id, ref.collection!, ref.id!)) {
+      if (policy == null || policy.ephemeral) {
         await _publish(topic, Uint8List(0));
-      } else {
+      } else if (policy.writers == Writers.self) {
+        await _publish(topic, Uint8List(0));
         final i = e.item;
-        await _publish(topic, _seal(topic, i?.body ?? Uint8List(0), rev: e.rev + 1, deleted: i == null));
+        if (i != null && e.opened.signerId == _me.id && mine(ref.id!)) {
+          final newId = _pseudonym(_me.id) + ref.id!.substring(myPseudonym.length);
+          await put(ref.collection!, newId, i.body, recipients: i.recipients);
+        }
+      } else if (currentAcl.canWrite(_me.id, ref.collection!, ref.id!, isSelfItem: (_, _) => false)) {
+        await _publish(topic, _reseal(topic, e));
+      } else {
+        await _publish(topic, Uint8List(0));
       }
     }
     _ownEphemeral.clear();
@@ -305,6 +406,7 @@ class SecureChannel {
     }
     _key?.dispose();
     _key = key;
+    _pseudonyms.clear();
     _reprocessAll();
   }
 
@@ -351,7 +453,7 @@ class SecureChannel {
         if (e.item case final i? when !_fresh(i, now)) (t, i),
     ];
     for (final (t, i) in stale) {
-      _entries[t] = _Entry(_entries[t]!.rev, _entries[t]!.time, null);
+      _entries[t] = _Entry(_entries[t]!.opened, null);
       _emit(ItemRemoved(i.collection, i.id, expired: true));
     }
   }
@@ -382,6 +484,25 @@ class SecureChannel {
   }
 
   DateTime _now() => _clock().toUtc();
+
+  String _pseudonym(String memberId) {
+    final key = _key ?? (throw StateError('channel locked'));
+    return _pseudonyms[memberId] ??= b64u(
+      _c.sodium.crypto.genericHash(
+        message: Uint8List.fromList([...utf8Bytes('pep-self-v1'), ...publicKeyFromId(memberId)]),
+        key: key.pseudonymKey,
+        outLen: 16,
+      ),
+    );
+  }
+
+  bool _isSelfItem(String memberId, String itemId) {
+    final p = _pseudonym(memberId);
+    return itemId == p || (itemId.startsWith('$p.') && _deviceRe.hasMatch(itemId.substring(p.length + 1)));
+  }
+
+  bool _canWrite(String memberId, String collection, String id) =>
+      acl.canWrite(memberId, collection, id, isSelfItem: _isSelfItem);
 
   /// Ephemeral items are fresh within the TTL after their publish time (and
   /// at most 5 minutes in the future, for clock skew).
@@ -417,14 +538,111 @@ class SecureChannel {
     _requireUnlocked();
     final policy = acl.collections[checkCollection(collection)];
     if (policy == null) throw AuthorizationException('collection "$collection" is not declared in the access list');
-    if (!acl.canWrite(_me.id, collection, id)) {
-      throw AuthorizationException('not allowed to write $collection/$id');
-    }
+    if (!_canWrite(_me.id, collection, id)) throw AuthorizationException('not allowed to write $collection/$id');
     return policy;
   }
 
-  Uint8List _seal(String topic, Uint8List body, {required int rev, bool deleted = false}) =>
-      _env.seal(key: _key!.dataKey, topic: topic, body: body, signer: _me, rev: rev, time: _now(), deleted: deleted);
+  Uint8List _seal(String topic, Uint8List body, {required int rev, bool deleted = false, bool restricted = false}) =>
+      _env.seal(
+        key: _key!.dataKey,
+        topic: topic,
+        body: body,
+        signer: _me,
+        rev: rev,
+        time: _now(),
+        deleted: deleted,
+        restricted: restricted,
+      );
+
+  /// Re-signs an accepted entry under the current key (revision + 1), keeping
+  /// restricted blocks sealed as they are.
+  Uint8List _reseal(String topic, _Entry e) =>
+      _seal(topic, e.opened.body, rev: e.rev + 1, deleted: e.opened.deleted, restricted: e.opened.restricted);
+
+  // Restricted block:
+  //   u8 count | count × (recipient public key[32] | sealed content key[80])
+  //   | nonce[24] | XChaCha20-Poly1305(content key, ad = topic, flags u8 | payload)
+  // flags bit0: payload deflated.
+  static const _sealedKeyBytes = 32 + 48;
+
+  Uint8List _restrict(String topic, Uint8List body, Set<String> recipients) {
+    if (recipients.length > 255) throw ArgumentError('at most 255 recipients');
+    final key = _c.sodium.crypto.aeadXChaCha20Poly1305IETF.keygen();
+    try {
+      final contentKey = key.extractBytes();
+      var flags = 0;
+      var payload = body;
+      if (body.length > 64) {
+        final z = deflate(body);
+        if (z.length < body.length) {
+          payload = z;
+          flags = 1;
+        }
+      }
+      final nonce = _c.randomBytes(24);
+      final ct = _c.sodium.crypto.aeadXChaCha20Poly1305IETF.encrypt(
+        message:
+            (ByteWriter()
+                  ..u8(flags)
+                  ..bytes(payload))
+                .take(),
+        nonce: nonce,
+        key: key,
+        additionalData: utf8Bytes(topic),
+      );
+      final w = ByteWriter()..u8(recipients.length);
+      for (final r in recipients.toList()..sort()) {
+        w
+          ..bytes(publicKeyFromId(r))
+          ..bytes(Identity.sealFor(_c, r, contentKey));
+      }
+      return (w
+            ..bytes(nonce)
+            ..bytes(ct))
+          .take();
+    } finally {
+      key.dispose();
+    }
+  }
+
+  /// Returns the recipients and, if this member is one of them, the body.
+  (Set<String>, Uint8List?) _unrestrict(String topic, Uint8List block) {
+    final r = ByteReader(block);
+    final n = r.u8();
+    final recipients = <String>{};
+    Uint8List? sealedForMe;
+    for (var i = 0; i < n; i++) {
+      final id = b64u(r.bytes(Identity.publicKeyBytes));
+      final sealed = r.bytes(_sealedKeyBytes);
+      recipients.add(id);
+      if (id == _me.id) sealedForMe = Uint8List.fromList(sealed);
+    }
+    final nonce = r.bytes(24);
+    final ct = r.rest();
+    if (sealedForMe == null) return (recipients, null);
+    final contentKey = _me.openSealed(sealedForMe);
+    if (contentKey == null) throw const FormatPepException('restricted item: content key not readable');
+    final key = _c.sodium.secureCopy(contentKey);
+    try {
+      final Uint8List plain;
+      try {
+        plain = _c.sodium.crypto.aeadXChaCha20Poly1305IETF.decrypt(
+          cipherText: ct,
+          nonce: nonce,
+          key: key,
+          additionalData: utf8Bytes(topic),
+        );
+      } catch (_) {
+        throw const FormatPepException('restricted item: cannot decrypt');
+      }
+      final p = ByteReader(plain);
+      final flags = p.u8();
+      final payload = Uint8List.fromList(p.rest());
+      return (recipients, flags & 1 != 0 ? inflate(payload) : payload);
+    } finally {
+      key.dispose();
+    }
+  }
 
   Future<void> _publishMeta(ChannelMeta meta) async {
     final data = meta.seal(topic: topics.meta, owner: _me);
@@ -458,16 +676,18 @@ class SecureChannel {
     _process(ref, topic, payload);
   }
 
+  /// After unlock: access list first (it names the current owner), then the
+  /// metadata if still unverified, then the items.
   void _reprocessAll() {
     int order(TopicRef r) => switch (r.kind) {
-      TopicKind.meta => 0,
-      TopicKind.acl => 1,
+      TopicKind.acl => 0,
+      TopicKind.meta => 1,
       _ => 2,
     };
     final all = [for (final e in _raw.entries) (topics.parse(e.key)!, e.key, e.value)]
       ..sort((a, b) => order(a.$1).compareTo(order(b.$1)));
     for (final (ref, topic, payload) in all) {
-      if (ref.kind != TopicKind.meta) _process(ref, topic, payload);
+      if (ref.kind != TopicKind.meta || !_metaVerified) _process(ref, topic, payload);
     }
   }
 
@@ -486,19 +706,43 @@ class SecureChannel {
           break;
       }
     } on PepException catch (e) {
+      // An item that no longer decrypts (e.g. still under the key from before
+      // a password change) is no longer part of the channel: stop showing it.
+      if (e is DecryptionException && ref.kind == TopicKind.item) _hide(ref, topic);
       _emit(MessageRejected(topic, e));
     }
   }
 
+  void _hide(TopicRef ref, String topic) {
+    final e = _entries[topic];
+    if (e?.item == null) return;
+    _entries[topic] = _Entry(e!.opened, null);
+    _emit(ItemRemoved(ref.collection!, ref.id!));
+  }
+
+  /// Metadata is signed by the current owner. Before the access list (and so
+  /// the ownership chain) is known, metadata not signed by the trusted key
+  /// from the link is accepted provisionally — only to derive the key — and
+  /// must be verified once the access list is known (see [join]).
   void _onMeta(String topic, Uint8List payload) {
     if (payload.isEmpty) {
       if (_meta != null) _emit(const ChannelDeleted());
       return;
     }
-    final meta = ChannelMeta.open(_c, topic: topic, data: payload, ownerKey: _ownerKey);
+    final a = _acl;
+    final signedByOwner = ChannelMeta.verifies(
+      _c,
+      topic: topic,
+      data: payload,
+      ownerKey: publicKeyFromId(a?.ownerId ?? _anchorId),
+    );
+    if (a != null && !signedByOwner) throw const AuthorizationException('meta not signed by the channel owner');
+    final meta = ChannelMeta.parseUnverified(payload);
     final current = _meta;
-    if (current != null && meta.rev <= current.rev) return;
+    if (current != null && _metaVerified && meta.rev <= current.rev) return;
     _meta = meta;
+    _metaVerified = signedByOwner;
+    _metaAcceptedRaw = payload;
     if (!_metaArrived.isCompleted) _metaArrived.complete();
     if (current != null && _key != null && !bytesEqual(_key!.check, meta.keyCheck)) {
       _key!.dispose();
@@ -513,16 +757,29 @@ class SecureChannel {
       return;
     }
     final o = _env.open(key: _key!.dataKey, topic: topic, data: payload);
-    if (o.signerId != ownerId) throw const AuthorizationException('access list not signed by the owner');
     if (o.deleted) throw const FormatPepException('access list tombstone');
     final acl = ChannelAcl.decode(o.body);
-    if (acl.ownerId != ownerId) throw const FormatPepException('access list owner mismatch');
+    acl.verifyChain(_c, channelId, _anchorId);
+    if (o.signerId != acl.ownerId) throw const AuthorizationException('access list not signed by the owner');
+    if (acl.offer != null && !acl.offerValid(_c, channelId)) {
+      throw const AuthorizationException('invalid ownership offer');
+    }
+    final current = _acl;
+    if (current != null && !current.isChainPrefixOf(acl)) {
+      throw const AuthorizationException('ownership chain does not extend the known one');
+    }
     final v = _aclVersion;
-    if (v != null && !(o.rev > v.$1 || (o.rev == v.$1 && o.time.isAfter(v.$2)))) return;
+    final grows = current != null && acl.owners.length > current.owners.length;
+    if (v != null && !grows && !(o.rev > v.$1 || (o.rev == v.$1 && o.time.isAfter(v.$2)))) return;
     _acl = acl;
     _aclVersion = (o.rev, o.time);
     if (!_aclArrived.isCompleted) _aclArrived.complete();
     _emit(AclUpdated(acl));
+    // Metadata signed by a new owner may have arrived before this access list.
+    final rawMeta = _raw[topics.meta];
+    if (rawMeta != null && (!_metaVerified || !bytesEqual(rawMeta, _metaAcceptedRaw ?? Uint8List(0)))) {
+      _process(const TopicRef(TopicKind.meta), topics.meta, rawMeta);
+    }
     for (final t in [..._pending]) {
       final raw = _raw[t];
       if (raw != null) _process(topics.parse(t)!, t, raw);
@@ -534,7 +791,7 @@ class SecureChannel {
       _pending.remove(topic);
       final e = _entries[topic];
       if (e?.item != null) {
-        _entries[topic] = _Entry(e!.rev, e.time, null);
+        _entries[topic] = _Entry(e!.opened, null);
         _emit(ItemRemoved(collection, id));
       }
       return;
@@ -546,33 +803,43 @@ class SecureChannel {
       throw AuthorizationException('collection "$collection" is not declared');
     }
     final o = _env.open(key: _key!.dataKey, topic: topic, data: payload);
-    if (!a.canWrite(o.signerId, collection, id)) {
+    if (!_canWrite(o.signerId, collection, id)) {
       _pending.add(topic);
       throw AuthorizationException('${o.signerId} may not write $collection/$id');
     }
     _pending.remove(topic);
     final known = _entries[topic];
-    if (known != null && !(o.rev > known.rev || (o.rev == known.rev && o.time.isAfter(known.time)))) return;
-    final hadItem = known?.item != null;
-    if (o.deleted) {
-      _entries[topic] = _Entry(o.rev, o.time, null);
-      if (hadItem) _emit(ItemRemoved(collection, id));
-      return;
+    if (known != null && !known.olderThan(o)) return;
+    final wasVisible = known?.item != null;
+    ChannelItem? item;
+    var expired = false;
+    if (!o.deleted) {
+      if (o.restricted) {
+        final (recipients, body) = _unrestrict(topic, o.body);
+        if (body != null) item = _makeItem(collection, id, o, body, Set.unmodifiable(recipients));
+      } else {
+        item = _makeItem(collection, id, o, o.body, null);
+      }
+      if (item != null && !_fresh(item, _now())) {
+        item = null;
+        expired = true;
+      }
     }
-    final item = ChannelItem(
-      collection: collection,
-      id: id,
-      rev: o.rev,
-      time: o.time,
-      signerId: o.signerId,
-      body: o.body,
-    );
-    if (!_fresh(item, _now())) {
-      _entries[topic] = _Entry(o.rev, o.time, null);
-      if (hadItem) _emit(ItemRemoved(collection, id, expired: true));
-      return;
+    _entries[topic] = _Entry(o, item);
+    if (item != null) {
+      _emit(ItemUpdated(item));
+    } else if (wasVisible) {
+      _emit(ItemRemoved(collection, id, expired: expired));
     }
-    _entries[topic] = _Entry(o.rev, o.time, item);
-    _emit(ItemUpdated(item));
   }
+
+  ChannelItem _makeItem(String collection, String id, Opened o, Uint8List body, Set<String>? recipients) => ChannelItem(
+    collection: collection,
+    id: id,
+    rev: o.rev,
+    time: o.time,
+    signerId: o.signerId,
+    body: body,
+    recipients: recipients,
+  );
 }

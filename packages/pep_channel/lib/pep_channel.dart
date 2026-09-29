@@ -12,6 +12,7 @@ export 'src/channel/secure_channel.dart';
 export 'src/codec/bytes.dart' show b64u, unb64u, utf8Bytes;
 export 'src/crypto/envelope.dart';
 export 'src/crypto/identity.dart';
+export 'src/crypto/identity_backup.dart';
 export 'src/crypto/kdf.dart';
 export 'src/crypto/pep_crypto.dart';
 export 'src/errors.dart';

@@ -64,6 +64,13 @@ owner-signed ACL declaring collections + writer policy owner/editors/self + opti
 other content types later → new collection in PepCollections + type in pep_content; collections
 are declared in the ACL so older apps still enforce their rules.
 
+**Identity, ownership, visibility (user decisions, 2026-09-29):** one identity per *user*, copied
+to each of their devices via passphrase-protected `IdentityBackup` (lost device ⇒ new identity);
+project ownership transferable (offer/accept, ownership chain in the ACL, former owner becomes
+editor); per-track visibility via restricted items (content key sealed per recipient); member ids
+never in topics (per-channel pseudonyms); positions per device (`.device` suffix). Friends list,
+contact exchange and cross-device sync are app-layer → `docs/TODO.md`.
+
 **Status (2026-09-29):** libraries done and committed (now split into pep_channel/pep_content/pep_core): 213 test runs green
 (VM + Chromium; memory broker + mosquitto TCP/TLS/WS/WSS/auth), ~96 % line coverage, `pep` CLI and
 `.claude/scripts/e2e.sh` pass. **Next: Flutter apps** (user wants to start them once the library is

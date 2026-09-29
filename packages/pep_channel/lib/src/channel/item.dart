@@ -9,6 +9,7 @@ class ChannelItem {
     required this.time,
     required this.signerId,
     required this.body,
+    this.recipients,
   });
 
   final String collection;
@@ -25,6 +26,12 @@ class ChannelItem {
 
   /// Opaque content, decoded by the content layer.
   final Uint8List body;
+
+  /// Members allowed to read this item (always including the owner at publish
+  /// time and the publisher); null = every member.
+  final Set<String>? recipients;
+
+  bool get restricted => recipients != null;
 
   @override
   String toString() => 'ChannelItem($collection/$id rev $rev by $signerId, ${body.length} bytes)';

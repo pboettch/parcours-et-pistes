@@ -11,6 +11,7 @@ class Track {
       rev = item.rev,
       updated = item.time,
       signerId = item.signerId,
+      visibleTo = item.recipients,
       gpx = utf8.decode(item.body),
       _parsed = parsed;
 
@@ -24,6 +25,10 @@ class Track {
 
   /// Member (owner or editor) who published this revision.
   final String signerId;
+
+  /// Members allowed to see this track (always including the owner and the
+  /// publisher); null = every member.
+  final Set<String>? visibleTo;
 
   /// The GPX 1.1 document as published.
   final String gpx;

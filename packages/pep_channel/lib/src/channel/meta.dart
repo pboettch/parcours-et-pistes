@@ -28,13 +28,25 @@ class ChannelMeta {
 
   /// Verifies the owner signature and parses.
   factory ChannelMeta.open(PepCrypto c, {required String topic, required Uint8List data, required Uint8List ownerKey}) {
-    final r = ByteReader(data);
-    final sig = r.bytes(Identity.signatureBytes);
-    final json = r.rest();
-    if (!Identity.verify(c, _toSign(topic, json), sig, ownerKey)) {
+    if (!verifies(c, topic: topic, data: data, ownerKey: ownerKey)) {
       throw const AuthorizationException('meta not signed by the channel owner');
     }
-    return ChannelMeta.fromJson(decodeJson(json));
+    return ChannelMeta.parseUnverified(data);
+  }
+
+  /// Parses without checking the signature. Only for deriving the key while
+  /// joining, before the current owner is known; see `SecureChannel`.
+  factory ChannelMeta.parseUnverified(Uint8List data) {
+    final r = ByteReader(data);
+    r.bytes(Identity.signatureBytes);
+    return ChannelMeta.fromJson(decodeJson(r.rest()));
+  }
+
+  static bool verifies(PepCrypto c, {required String topic, required Uint8List data, required Uint8List ownerKey}) {
+    if (data.length < Identity.signatureBytes) return false;
+    final sig = Uint8List.sublistView(data, 0, Identity.signatureBytes);
+    final json = Uint8List.sublistView(data, Identity.signatureBytes);
+    return Identity.verify(c, _toSign(topic, json), sig, ownerKey);
   }
 
   static const version = 1;
