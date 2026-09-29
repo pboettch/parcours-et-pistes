@@ -1,9 +1,10 @@
 import 'dart:typed_data';
 
-import '../errors.dart';
+import 'errors.dart';
 import 'json.dart';
 
-/// Live position (`pos/<member id>` topic), signed by that member.
+/// A live position (`pos` collection, one item per member). How long it stays
+/// visible is decided by the channel (collection TTL), from the publish time.
 class Position {
   Position({
     required this.lat,
@@ -15,7 +16,7 @@ class Position {
     this.speed,
   }) {
     if (!(lat >= -90 && lat <= 90) || !(lon >= -180 && lon <= 180)) {
-      throw FormatPepException('coordinates out of range: $lat, $lon');
+      throw ContentFormatException('coordinates out of range: $lat, $lon');
     }
   }
 
@@ -39,7 +40,7 @@ class Position {
   /// WGS84 degrees.
   final double lat, lon;
 
-  /// When the fix was taken.
+  /// When the fix was taken (may be earlier than the publish time).
   final DateTime time;
 
   /// Metres above sea level.
@@ -53,13 +54,6 @@ class Position {
 
   /// Metres per second.
   final double? speed;
-
-  /// Whether this position is still to be shown, given the project's TTL.
-  /// Positions dated too far in the future are rejected as well.
-  bool isFresh(Duration ttl, {DateTime? now, Duration clockSkew = const Duration(minutes: 5)}) {
-    final n = now ?? DateTime.now();
-    return time.isAfter(n.subtract(ttl)) && time.isBefore(n.add(clockSkew));
-  }
 
   Json toJson() => {
         'v': version,

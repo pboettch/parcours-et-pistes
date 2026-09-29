@@ -1,6 +1,6 @@
 import 'package:xml/xml.dart';
 
-import '../errors.dart';
+import 'errors.dart';
 
 /// GPX 1.1 namespace.
 const gpxNamespace = 'http://www.topografix.com/GPX/1/1';
@@ -33,7 +33,7 @@ extension GpxExtensionAccess on List<XmlElement> {
 class GpxPoint {
   GpxPoint(this.lat, this.lon, {this.ele, this.time, this.extensions = const []}) {
     if (!(lat >= -90 && lat <= 90) || !(lon >= -180 && lon <= 180)) {
-      throw FormatPepException('GPX coordinates out of range: $lat, $lon');
+      throw ContentFormatException('GPX coordinates out of range: $lat, $lon');
     }
   }
 
@@ -121,10 +121,10 @@ class Gpx {
     try {
       doc = XmlDocument.parse(xml);
     } on XmlException catch (e) {
-      throw FormatPepException('invalid GPX: ${e.message}');
+      throw ContentFormatException('invalid GPX: ${e.message}');
     }
     final root = doc.rootElement;
-    if (root.localName != 'gpx') throw const FormatPepException('invalid GPX: root is not <gpx>');
+    if (root.localName != 'gpx') throw const ContentFormatException('invalid GPX: root is not <gpx>');
     final meta = _child(root, 'metadata');
     return Gpx(
       name: _text(meta, 'name'),
@@ -294,7 +294,7 @@ class Gpx {
 
   static double _coord(XmlElement e, String attr) {
     final v = double.tryParse(e.getAttribute(attr) ?? '');
-    if (v == null) throw FormatPepException('invalid GPX: <${e.localName}> lacks $attr');
+    if (v == null) throw ContentFormatException('invalid GPX: <${e.localName}> lacks $attr');
     return v;
   }
 

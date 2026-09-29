@@ -1,0 +1,11 @@
+name: parcours_et_pistes
+description: Workspace of the Parcours et Pistes packages and apps.
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+workspace:
+  - packages/pep_channel
+  - packages/pep_content
+  - packages/pep_core

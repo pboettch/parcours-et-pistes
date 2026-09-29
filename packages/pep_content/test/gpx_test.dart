@@ -1,4 +1,4 @@
-import 'package:pep_core/pep_core.dart';
+import 'package:pep_content/pep_content.dart';
 import 'package:test/test.dart';
 
 const sample = '''<?xml version="1.0" encoding="UTF-8"?>
@@ -72,7 +72,7 @@ void main() {
       '<gpx><wpt lon="5"/></gpx>',
       '<gpx><trk><trkseg><trkpt lat="95" lon="5"/></trkseg></trk></gpx>',
     ]) {
-      expect(() => Gpx.parse(bad), throwsA(isA<FormatPepException>()), reason: bad);
+      expect(() => Gpx.parse(bad), throwsA(isA<ContentFormatException>()), reason: bad);
     }
   });
 }
