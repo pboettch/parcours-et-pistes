@@ -37,4 +37,10 @@ Small user base, but published on App Store and Play Store.
 - MQTT 5 (`mqtt5_client`) behind a pluggable `Transport` interface; positions use message expiry
   plus client-side TTL filter.
 - Topic layout `pep/v1/<uuid>/{meta,project,track/<id>,member/<id>,pos/<id>}`.
-- Full plan: see git history / `CLAUDE.md`. Conventions: [[feedback-repo-conventions]].
+- Full design: `docs/DESIGN.md`. Conventions: [[feedback-repo-conventions]].
+
+**Spike results (2026-09-29):** Flutter SDK is user-local at `/home/pmp/devel/flutter` (Dart 3.13.4;
+`source .claude/scripts/env.sh`). `sodium` 4.x needs `SodiumSumoInit` for Argon2id; browser tests load
+sumo `sodium.js` via `dart_test.yaml` HTML template. Argon2id t=3/64 MiB: ~22 ms VM, ~74 ms Chromium →
+chosen as default KDF params. System mosquitto 2.1.2 installed; dev broker via `.claude/scripts/broker.sh`
+(ports 18883/18080) and retained-message expiry verified working.

@@ -9,6 +9,7 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
   transport, high-level `ProjectSession`). Built and fully tested before any app work.
 - `apps/` — Flutter apps (later).
 - `tools/broker/` — development MQTT 5 broker setup.
+- `docs/DESIGN.md` — architecture, crypto, topic layout, phases.
 - `.claude/memory/` — Claude memories (versioned; `~/.claude/projects/...-parcours-et-pistes/memory`
   is a symlink here). Index: `.claude/memory/MEMORY.md`.
 - `.claude/scripts/` — helper scripts for Claude/dev tasks.
@@ -19,3 +20,8 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
   (format version + KDF salt/params).
 - Library code must run on the Dart VM and in the browser (no `dart:io` outside transport/CLI
   entry points guarded by conditional imports).
+
+## Dev commands
+- `source .claude/scripts/env.sh` — Flutter/Dart SDK on PATH (user-local in `/home/pmp/devel/flutter`).
+- `.claude/scripts/broker.sh start|stop|status` — local mosquitto (MQTT 18883, WS 18080).
+- `.claude/scripts/test.sh [args]` — `dart test` on VM + Chromium.

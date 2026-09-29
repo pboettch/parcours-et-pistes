@@ -1,0 +1,6 @@
+# Browser tests need sodium.js (sumo); fetch it with .claude/scripts/fetch_sodium_js.sh
+custom_html_template_path: test/web/template.html.tpl
+tags:
+  broker:
+    # Requires the local dev broker (.claude/scripts/broker.sh start)
+    skip: false
