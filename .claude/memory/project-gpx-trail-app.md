@@ -88,6 +88,12 @@ first**, map-first (current position + menu); layers IGN, OSM Rando, OSM, satell
 `apps/pep_app` exists (see CLAUDE.md); private example project seeded from the CCO site on the
 local broker ([[reference-cco-prototype]]; browser identity made editor via CLI).
 
+**GUI direction (user, 2026-09-30, still thinking):** the overview of all trails of a project will
+be a *dedicated window*; the **one-track window** is the most used part — used by the poseurs while
+laying the track and by the judge/trainers to follow the track while the dog searches. The dog
+tracking line "needs more reflection — probably a dedicated service" (current PoC: the source
+member's app records the path into `trace`). Don't implement these before the user decides.
+
 **Gotchas learned:** Flutter web in the Browser pane: debug (DDC) builds are slow/flaky → use the
 release `app.sh serve`; the pane caches `localhost` → open `127.0.0.1:8686/?v=N`; coordinate clicks
 get lost on the canvas → semantics are on (`ensureSemantics`), click via `find` refs; the pane
