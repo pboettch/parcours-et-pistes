@@ -92,7 +92,12 @@ local broker ([[reference-cco-prototype]]; browser identity made editor via CLI)
 be a *dedicated window*; the **one-track window** is the most used part — used by the poseurs while
 laying the track and by the judge/trainers to follow the track while the dog searches. The dog
 tracking line "needs more reflection — probably a dedicated service" (current PoC: the source
-member's app records the path into `trace`). Don't implement these before the user decides.
+member's app records the path into `trace`); who runs the service = open question, left for later;
+user asks whether MQTT can hold the full position history of one person (answer: yes, as retained
+encrypted chunks like `trace`, written by the service as a bot → needs an editors-writable collection,
+since `trace` is `self`). Poseur use of the one-track window = follow the planned track with their own
+position and know where to put the objects (track *recording* comes later). Don't implement these
+before the user decides.
 
 **Gotchas learned:** Flutter web in the Browser pane: debug (DDC) builds are slow/flaky → use the
 release `app.sh serve`; the pane caches `localhost` → open `127.0.0.1:8686/?v=N`; coordinate clicks
