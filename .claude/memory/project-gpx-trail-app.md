@@ -90,8 +90,10 @@ local broker ([[reference-cco-prototype]]; browser identity made editor via CLI)
 
 **Gotchas learned:** Flutter web in the Browser pane: debug (DDC) builds are slow/flaky → use the
 release `app.sh serve`; the pane caches `localhost` → open `127.0.0.1:8686/?v=N`; coordinate clicks
-get lost on the canvas → semantics are on (`ensureSemantics`), click via `find` refs; flutter_map 8
-tile layer can miss a programmatic camera move at startup → `reset` stream after moves.
+get lost on the canvas → semantics are on (`ensureSemantics`), click via `find` refs; the pane
+throttles requestAnimationFrame (<1 fps when unfocused), so grey tiles there are a rendering artefact,
+not a bug — never "fix" them with TileLayer resets (that aborted tiles on every app event, Firefox
+NS_BINDING_ABORTED); tiles use `TileDisplay.instantaneous()`.
 Workspace + Flutter: Flutter pins `test_api`, so the packages use `test: ^1.25.0`; CI uses the
 Flutter SDK.  mosquitto ACLs accept denied subscriptions (silently filtered) but refuse denied
 QoS1 publishes with PUBACK 0x87; `archive`'s Inflate doesn't report corrupt streams (hence the u32
