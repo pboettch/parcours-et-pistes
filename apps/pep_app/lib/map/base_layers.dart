@@ -45,15 +45,16 @@ class BaseLayer {
 
   static BaseLayer byId(String? id) => all.firstWhere((l) => l.id == id, orElse: () => ign);
 
-  /// [reset]: reloads the tiles when it emits.
-  List<Widget> build({Stream<void>? reset}) => [
+  /// The tile layers. Tiles are shown as soon as loaded: the default fade-in
+  /// needs animation frames, and tiles still fading are not displayed.
+  List<Widget> build() => [
     for (final (url, maxNative) in tiles)
       TileLayer(
         urlTemplate: url,
         maxNativeZoom: maxNative,
         maxZoom: 21,
         userAgentPackageName: _userAgent,
-        reset: reset,
+        tileDisplay: const TileDisplay.instantaneous(),
       ),
   ];
 }

@@ -25,13 +25,10 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   final _map = MapController();
-
-  /// Reloads the tiles: they are sometimes not loaded after a programmatic
-  /// camera move made while the app starts (flutter_map 8).
-  final _tileReset = StreamController<void>.broadcast();
   var _ready = false;
   var _follow = true;
   String? _fittedProject, _fittedTrack;
+  Position? _followed;
   Timer? _clock;
 
   AppState get app => widget.app;
@@ -49,7 +46,6 @@ class _MapScreenState extends State<MapScreen> {
   void dispose() {
     app.removeListener(_onApp);
     _clock?.cancel();
-    unawaited(_tileReset.close());
     super.dispose();
   }
 
@@ -65,11 +61,11 @@ class _MapScreenState extends State<MapScreen> {
   /// Fits the project's tracks when a project opens, the track when one gets
   /// selected, and follows the user otherwise (until the map is dragged).
   void _moveCamera() {
-    _moveCameraOnly();
-    Future<void>.delayed(const Duration(milliseconds: 300), () => _tileReset.isClosed ? null : _tileReset.add(null));
+    if (!_fit()) _followMe();
   }
 
-  void _moveCameraOnly() {
+  /// Fits the camera to a newly opened project or selected track; true if it did.
+  bool _fit() {
     final s = app.session;
     if (s != null && _fittedProject != s.projectId) {
       _fittedProject = s.projectId;
@@ -78,7 +74,7 @@ class _MapScreenState extends State<MapScreen> {
       if (pts.length > 1) {
         _follow = false;
         _map.fitCamera(CameraFit.coordinates(coordinates: pts, padding: const EdgeInsets.all(48)));
-        return;
+        return true;
       }
     }
     if (app.selectedTrackId != _fittedTrack) {
@@ -92,10 +88,18 @@ class _MapScreenState extends State<MapScreen> {
             padding: const EdgeInsets.fromLTRB(48, 96, 48, 220),
           ),
         );
-        return;
+        return true;
       }
     }
-    if (_follow && app.myPosition != null) _map.move(ll(app.myPosition!), math.max(_map.camera.zoom, 15));
+    return false;
+  }
+
+  /// In follow mode, keeps the user's new positions in view.
+  void _followMe() {
+    final me = app.myPosition;
+    if (!_follow || me == null || identical(me, _followed)) return;
+    _followed = me;
+    _map.move(ll(me), math.max(_map.camera.zoom, 15));
   }
 
   void _locate() {
@@ -147,7 +151,7 @@ class _MapScreenState extends State<MapScreen> {
               },
             ),
             children: [
-              ...app.layer.build(reset: _tileReset.stream),
+              ...app.layer.build(),
               if (s != null) ..._projectLayers(s, selected, runId),
               ..._myLayers(),
               Scalebar(alignment: Alignment.bottomLeft, padding: const EdgeInsets.fromLTRB(12, 0, 0, 28)),
