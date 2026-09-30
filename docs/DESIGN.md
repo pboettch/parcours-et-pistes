@@ -109,7 +109,8 @@ Changing the recipients = publishing a new revision; members dropped from the li
 | `member` | member pseudonym | self | — | `MemberProfile` JSON: name, bot?, extra? |
 | `pos` | member pseudonym [`.device`] | self | project setting (default 30 min) | `Position` JSON: lat, lon, ts (fix time), alt?, acc?, hdg?, spd? |
 | `run` | random | editors | — | `Run` JSON: track (id), dog, handler?, src [{m: member id, t: since ms}], start?, end?, extra? |
-| `trace` | member pseudonym `.h<hour>[-device]` | self | — | GPX with one track segment: the member's recorded path during that hour (UTC hours since the epoch) |
+| `path_pt` | member pseudonym `.p<time ms base36>[-device]` | self | — | `Position` JSON: one recorded point of the member's path (while designated as a run's source) |
+| `path` | member pseudonym `.q<15-min slot>` | editors | — | GPX with `<pep:path member="…"/>` in the metadata and one track segment: points of `path_pt` compacted by the owner or an editor |
 
 Collections added by a version are declared in new projects; the owner's session adds them to
 older projects when it joins (`ProjectSession.ensureCollections`).
@@ -121,10 +122,24 @@ member (`MemberProfile.bot`) such as a service feeding a GPS collar (Tractive) i
 with its own identity. The designated member can change during the day; `Run.src` keeps every
 change, so the dog's path is the concatenation of each source's path over its period.
 
-While a member is the source of an unfinished run, its sessions record its positions (accuracy
-≤ 50 m) into `trace` (default `TraceMode.whenSource`; republished at most every 30 s), so members
-joining later also see the dog's path. `ProjectSession.dogPath` combines the recordings and the
-live position; `runProgress` matches the path against the track (`TrailProgress`: first
+While a member is the source of an unfinished run, its sessions record each of its positions
+(accuracy ≤ 50 m) as **its own retained item** in `path_pt` (default `PathMode.whenSource`): nothing
+is overwritten, so nothing is lost if the app stops, and members joining later get the whole path.
+Points that cannot be published (no network in the forest) are queued with their real time and
+published with the next position. No server-side service is involved.
+
+To keep the number of retained messages small, the sessions of the owner and editors **compact**
+periodically (every 5 min, points older than 2 min; also before a password change, since members'
+own items do not survive it): the points of one member over one 15-minute slot are merged into a
+`path` chunk (GPX), then — after a sync barrier, and only for points the stored chunk actually
+contains — the single points are **purged** (`SecureChannel.purge`: the retained message is
+cleared, no tombstone). Chunk ids derive from the member's pseudonym and the slot, so concurrent
+compactions converge on the same item; a point that another compaction's chunk lacks is kept for
+the next round, so no point is lost. Chunks name their member in their (encrypted) content, so
+they survive password changes (new pseudonyms); readers merge chunks and points by timestamp.
+
+`ProjectSession.dogPath` combines the recorded path of each successive source over its period and
+the live position; `runProgress` matches the path against the track (`TrailProgress`: first
 confirmed start near the beginning of the track, then a forward-only cursor limited by the
 distance actually travelled, until the path leaves the track for good — ported from the CCO
 prototype).

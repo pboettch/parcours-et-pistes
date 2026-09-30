@@ -26,9 +26,18 @@ abstract final class PepCollections {
   /// and editors.
   static const run = 'run';
 
-  /// Recorded paths (GPX, one track segment per member, device and hour), so
-  /// that the path of a dog can be shown to members who were not online.
-  static const trace = 'trace';
+  /// Recorded path points (`Position`), one retained item per position, while
+  /// the member is a run's designated source: nothing is lost if the app
+  /// stops, and members joining later get the whole path. Item id = member
+  /// pseudonym + `.p<time>[-device]`.
+  static const pathPoint = 'path_pt';
+
+  /// Recorded paths compacted by the owner or an editor: the points of one
+  /// member over one [pathSlot] as a GPX track segment; the points merged are
+  /// then purged. Item id = member pseudonym + `.q<slot number>`.
+  static const path = 'path';
+
+  static const pathSlot = Duration(minutes: 15);
 
   /// Collections of a new project.
   static Map<String, CollectionPolicy> defaults({Duration positionTtl = defaultPositionTtl}) => {
@@ -37,6 +46,7 @@ abstract final class PepCollections {
     member: const CollectionPolicy(Writers.self),
     position: CollectionPolicy(Writers.self, ttl: positionTtl),
     run: const CollectionPolicy(Writers.editors),
-    trace: const CollectionPolicy(Writers.self),
+    pathPoint: const CollectionPolicy(Writers.self),
+    path: const CollectionPolicy(Writers.editors),
   };
 }

@@ -76,6 +76,10 @@ pep replay "$link" "${B[@]}" -p pw1 "$work/line.gpx" --speed 2 --rate 50 --inter
 pep run "$link" "${A[@]}" -p pw1 list | tee "$work/run.txt"
 grep -Eq "Rex / Ana on $line, running, source Tractive .*, (9[0-9]|100)%" "$work/run.txt"
 pep run "$link" "${O[@]}" -p pw1 finish "$run"
+pep compact "$link" "${O[@]}" -p pw1 --min-age 0 | tee "$work/compact.txt"
+grep -Eq "^[1-9][0-9]* path points merged" "$work/compact.txt"
+[[ $(mosquitto_sub -V mqttv5 -p 18883 -t "pep/v1/$pid/path_pt/#" -W 1 -F '%t' 2>/dev/null | wc -l) -eq 0 ]] && echo "no single points left"
+pep run "$link" "${A[@]}" -p pw1 list | grep -E "finished, source Tractive .*, (9[0-9]|100)%"
 
 step "broker view (admin wildcard): only meta is plaintext, no member ids in topics"
 mosquitto_sub -V mqttv5 -p 18883 -t "pep/v1/$pid/#" -W 1 -F '%t %l bytes, starts with: %x' 2>/dev/null \

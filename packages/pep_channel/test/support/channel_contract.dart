@@ -577,6 +577,29 @@ void channelContract(String name, ChannelHarness Function() harnessFactory) {
 
     // ------------------------------------------------ restricted items
 
+    test('purge: editors clear any item, members only their own; no tombstone', () async {
+      final o = await create();
+      await o.addEditor(aliceId.id);
+      final a = await join(o, aliceId);
+      final bob = await join(o, bobId);
+      final bobItem = bob.selfItemId(device: 'p1');
+      await bob.put('profile', bobItem, b('point'));
+      await o.put('note', 'n1', b('note'));
+      await eventually(() => a.item('profile', bobItem) != null && bob.item('note', 'n1') != null);
+
+      await expectLater(bob.purge('note', 'n1'), throwsA(isA<AuthorizationException>()));
+      await a.purge('profile', bobItem); // an editor, on someone else's item
+      await eventually(() => o.item('profile', bobItem) == null && bob.item('profile', bobItem) == null);
+      expect(events[o]!.whereType<ItemRemoved>().map((e) => e.id), contains(bobItem));
+      await bob.put('profile', bobItem, b('again'));
+      await eventually(() => o.item('profile', bobItem) != null);
+      await bob.purge('profile', bobItem); // a member, on its own item
+      await eventually(() => o.item('profile', bobItem) == null);
+      if (h.retained case final r?) {
+        expect(r.keys.where((t) => t.endsWith(bobItem)), isEmpty, reason: 'nothing left at the broker');
+      }
+    });
+
     test('restricted items are readable by their recipients only', () async {
       final o = await create();
       await o.addEditor(aliceId.id);

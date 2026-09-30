@@ -67,10 +67,9 @@ class RunRemoved extends SessionEvent {
   final String runId;
 }
 
-/// New points were recorded in the path of member [memberId] (see
-/// `ProjectSession.trace`).
-class TraceUpdated extends SessionEvent {
-  const TraceUpdated(this.memberId);
+/// The recorded path of member [memberId] changed (see `ProjectSession.path`).
+class PathUpdated extends SessionEvent {
+  const PathUpdated(this.memberId);
 
   final String memberId;
 }

@@ -80,7 +80,7 @@ done). Open topics for later: RU-specific track info (user will detail), default
 **Runs, dog position, GUI (user decisions, 2026-09-30):** the dog's position = a member the
 project leader designates (official follower of the handler's group, changeable during the day;
 events have several competing dogs on several tracks); Tractive collars feed MQTT through an
-external service acting as a **bot member**. Implemented: `Run` (pep_content) + `run`/`trace`
+external service acting as a **bot member**. Implemented: `Run` (pep_content) + `run`/`path_pt`/`path`
 collections, `dogPath`/`runProgress` (pep_core), CLI `run`/`replay`. The official RU trail sheet
 (organizers' part beforehand + judge's part on a tablet during the trail, stored in the GPX, app
 generates printable documents) comes later — placeholders only (`TrailInfo`). GUI PoC is **web
@@ -91,11 +91,10 @@ local broker ([[reference-cco-prototype]]; browser identity made editor via CLI)
 **GUI direction (user, 2026-09-30, still thinking):** the overview of all trails of a project will
 be a *dedicated window*; the **one-track window** is the most used part — used by the poseurs while
 laying the track and by the judge/trainers to follow the track while the dog searches. The dog
-tracking line "needs more reflection — probably a dedicated service" (current PoC: the source
-member's app records the path into `trace`); who runs the service = open question, left for later;
-user asks whether MQTT can hold the full position history of one person (answer: yes, as retained
-encrypted chunks like `trace`, written by the service as a bot → needs an editors-writable collection,
-since `trace` is `self`). Poseur use of the one-track window = follow the planned track with their own
+tracking line: **user's design, implemented 2026-09-30** — no service: the designated member's app
+publishes every position as its own retained item (`path_pt`), the owner/editors' sessions compact
+them into 15-min `path` chunks and purge the points (`SecureChannel.purge`); see DESIGN.md "Runs".
+A dedicated service remains an open idea for later. Poseur use of the one-track window = follow the planned track with their own
 position and know where to put the objects (track *recording* comes later). Don't implement these
 before the user decides.
 

@@ -471,6 +471,17 @@ class _MapScreenState extends State<MapScreen> {
                           s == null ? Icons.folder_off_outlined : (s.locked ? Icons.lock : Icons.cloud_done_outlined),
                           size: 18,
                         ),
+                      if (s != null && s.recordingPath) ...[
+                        const SizedBox(width: 6),
+                        Tooltip(
+                          message: s.pendingPathPoints == 0
+                              ? 'Votre position est enregistrée (position du chien)'
+                              : '${s.pendingPathPoints} positions en attente de connexion',
+                          child: Icon(Icons.pets, size: 18, color: Colors.red.shade400),
+                        ),
+                        if (s.pendingPathPoints > 0)
+                          Text(' ${s.pendingPathPoints}', style: const TextStyle(fontSize: 12)),
+                      ],
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text(

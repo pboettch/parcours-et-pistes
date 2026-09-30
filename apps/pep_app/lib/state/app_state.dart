@@ -127,7 +127,9 @@ class AppState extends ChangeNotifier {
     storage.lastProject = p.projectId;
     selectedTrackId = null;
     selectedRunId = s.runs.entries.where((r) => r.value.status == RunStatus.running).firstOrNull?.key;
+    _wasSource = false;
     _sessionSub = s.events.listen(_onSessionEvent);
+    _checkSource();
     unawaited(_publishProfile());
     if (sharing && myPosition != null) unawaited(_publishMine(myPosition!));
   }
@@ -136,7 +138,11 @@ class AppState extends ChangeNotifier {
     storage.projects = [p, ...projects.where((x) => x.projectId != p.projectId)];
   }
 
+  /// Whether this member was a run's designated position source at the last event.
+  var _wasSource = false;
+
   void _onSessionEvent(SessionEvent e) {
+    _checkSource();
     switch (e) {
       case ProjectUpdated(:final project):
         if (current case final p? when p.name != project.name) {
@@ -156,6 +162,27 @@ class AppState extends ChangeNotifier {
       default:
     }
     notifyListeners();
+  }
+
+  /// Tells the member when the leader makes them (or stops making them) the
+  /// position of a dog.
+  void _checkSource() {
+    final s = session;
+    if (s == null) return;
+    final source = s.recordingPath && s.pathMode == PathMode.whenSource;
+    if (source == _wasSource) return;
+    _wasSource = source;
+    if (source) {
+      final dogs = [
+        for (final r in s.runs.values)
+          if (r.status != RunStatus.finished && r.source == s.memberId) r.dog,
+      ];
+      error =
+          'Votre position est celle du chien ${dogs.join(', ')} : elle est enregistrée.'
+          '${sharing ? '' : ' Activez le partage de votre position.'}';
+    } else {
+      error = 'Votre position n\'est plus celle d\'un chien.';
+    }
   }
 
   Future<void> _closeSession() async {

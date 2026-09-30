@@ -76,6 +76,7 @@ Future<void> main(List<String> argv) async {
         ..addFlag('record', negatable: false, help: 'Always record the path (default: while run source)'),
     )
     ..addCommand('editor', _common())
+    ..addCommand('compact', _common()..addOption('min-age', help: 'Only points older than this (s)', defaultsTo: '120'))
     ..addCommand('passwd', _common()..addOption('new', mandatory: true))
     ..addCommand('delete', _common());
 
@@ -226,6 +227,9 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
         default:
           throw const FormatPepException('usage: pep owner <link> offer -- <member> | cancel | accept');
       }
+    case 'compact':
+      final minAge = Duration(seconds: int.parse(cmd.option('min-age')!));
+      print('${await s.compactPaths(minAge: minAge)} path points merged into chunks');
     case 'passwd':
       await s.changePassword(cmd.option('new')!);
     case 'delete':
@@ -275,7 +279,7 @@ Future<void> _watch(ProjectSession s) async {
         print('$t run $runId: ${_runSummary(s, runId, run)}');
       case RunRemoved(:final runId):
         print('$t run $runId removed');
-      case TraceUpdated(:final memberId):
+      case PathUpdated(:final memberId):
         for (final r in s.runs.entries.where((r) => r.value.source == memberId)) {
           print('$t run ${r.key}: ${_runSummary(s, r.key, r.value)}');
         }
@@ -348,7 +352,7 @@ Future<void> _replay(ProjectSession s, ArgResults cmd, String gpx) async {
   final points = Gpx.parse(gpx).tracks.expand((t) => t.points).toList();
   if (points.isEmpty) throw const FormatPepException('the GPX file has no track points');
   if (cmd.option('name') case final n?) await s.setMemberName(n, bot: cmd.flag('bot'));
-  if (cmd.flag('record')) s.traceMode = TraceMode.always;
+  if (cmd.flag('record')) s.pathMode = PathMode.always;
   final walker = TrailWalker(TrackLine(points), speed: double.parse(cmd.option('speed')!));
   final rate = double.parse(cmd.option('rate')!);
   final interval = Duration(milliseconds: (double.parse(cmd.option('interval')!) * 1000 / rate).round());
@@ -364,7 +368,7 @@ Future<void> _replay(ProjectSession s, ArgResults cmd, String gpx) async {
     );
     stderr.write(
       '\r${(math.min(1, elapsed.inMilliseconds / walker.duration.inMilliseconds) * 100).round()}% '
-      '${s.recordingTrace ? '(recording)' : ''}   ',
+      '${s.recordingPath ? '(recording)' : ''}   ',
     );
     if (walker.finishedAt(elapsed)) break;
     await Future<void>.delayed(interval);
@@ -469,6 +473,7 @@ commands:
                                       simulate a dog walking the track (publishes positions)
   editor <link> add|remove -- <member>  manage editors (owner; "--" because ids may start with "-")
   owner <link> offer -- <member> | cancel | accept   transfer the project ownership
+  compact <link> [--min-age s]        merge recorded path points into chunks (owner/editor)
   passwd <link> --new P               change the project password (owner)
   delete <link>                       delete the project from the broker (owner)
 

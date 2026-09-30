@@ -114,7 +114,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
             kdf: fastKdf(c),
             clock: h.clock,
             pruneInterval: const Duration(hours: 1),
-            traceFlushInterval: Duration.zero,
+            compactInterval: null,
           ),
         );
 
@@ -125,11 +125,11 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       JoinLink? link,
       Duration timeout = const Duration(seconds: 5),
       String? deviceId,
-      Duration traceFlushInterval = Duration.zero,
+      Transport? transport,
     }) async => track(
       await ProjectSession.join(
         crypto: c,
-        transport: h.transport(),
+        transport: transport ?? h.transport(),
         identity: who,
         link: link ?? JoinLink.parse(owner.joinLink.toUri()),
         password: password,
@@ -137,7 +137,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
         clock: h.clock,
         pruneInterval: const Duration(hours: 1),
         deviceId: deviceId,
-        traceFlushInterval: traceFlushInterval,
+        compactInterval: null,
       ),
     );
 
@@ -448,7 +448,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final runId = await o.putRun(Run(track: t.id, dog: 'Rex', handler: 'Ana'));
       await eventually(() => a.runs.containsKey(runId) && b.runs.containsKey(runId));
       expect(a.runs[runId]!.status, RunStatus.planned);
-      expect(a.recordingTrace, isFalse);
+      expect(a.recordingPath, isFalse);
       expect(o.runProgress(runId)!.started, isFalse);
       expect(o.runProgress('nope'), isNull);
       expect(o.dogPath('nope'), isEmpty);
@@ -457,33 +457,48 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
 
       await o.setRunSource(runId, aliceId.id);
       await o.startRun(runId);
-      await eventually(() => a.recordingTrace && a.runs[runId]!.status == RunStatus.running);
+      await eventually(() => a.recordingPath && a.runs[runId]!.status == RunStatus.running);
       await tick();
       await walk(a, [for (var m = 0.0; m <= 200; m += 40) m]);
-      await eventually(() => o.trace(aliceId.id).length == 6, reason: 'alice path recorded');
-      expect(events[o]!.whereType<TraceUpdated>().map((e) => e.memberId), contains(aliceId.id));
+      await eventually(() => o.path(aliceId.id).length == 6, reason: 'one retained item per position');
+      expect(o.channel.items(PepCollections.pathPoint), hasLength(6));
+      expect(events[o]!.whereType<PathUpdated>().map((e) => e.memberId), contains(aliceId.id));
       await walk(b, [300]); // not the source: not recorded
-      expect(b.recordingTrace, isFalse);
+      expect(b.recordingPath, isFalse);
 
       // The official follower changes: bob shares the dog's position from now on.
       await o.setRunSource(runId, bobId.id);
-      await eventually(() => b.recordingTrace && !a.recordingTrace);
+      await eventually(() => b.recordingPath && !a.recordingPath);
       await tick();
       await walk(b, [for (var m = 240.0; m <= 400; m += 40) m]);
       await walk(a, [550]); // no longer the source
       await eventually(() => o.dogPath(runId).length == 11, reason: 'both sources, each over its period');
-      expect(o.trace(aliceId.id), hasLength(6));
+      expect(o.path(aliceId.id), hasLength(6));
       final p = o.runProgress(runId)!;
       expect(p.started, isTrue);
       expect(p.progress, closeTo(400, 2));
       expect(p.fraction, closeTo(400 / 600, 0.01));
 
       await o.finishRun(runId);
-      await eventually(() => !b.recordingTrace);
+      await eventually(() => !b.recordingPath);
       expect(o.runs[runId]!.sources.map((s) => s.memberId), [aliceId.id, bobId.id]);
       expect(events[a]!.whereType<RunUpdated>(), isNotEmpty);
 
-      // Someone joining later sees the same path, from the recordings.
+      // The leader compacts: points become chunks, the single items are purged.
+      await expectLater(a.compactPaths(), throwsA(isA<AuthorizationException>()));
+      if (h.clock != null) h.advance(const Duration(minutes: 3));
+      final purged = await o.compactPaths(minAge: h.clock == null ? Duration.zero : ProjectSession.defaultCompactAge);
+      expect(purged, 11);
+      await eventually(() => a.channel.items(PepCollections.pathPoint).isEmpty, reason: 'purged everywhere');
+      expect(a.channel.items(PepCollections.path), isNotEmpty);
+      expect(a.dogPath(runId), hasLength(11));
+      expect(a.runProgress(runId)!.progress, closeTo(400, 2));
+      expect(await o.compactPaths(minAge: Duration.zero), 0, reason: 'nothing left to compact');
+      if (h.retained case final r?) {
+        expect(r.keys.where((t) => t.contains('/${PepCollections.pathPoint}/')), isEmpty);
+      }
+
+      // Someone joining later sees the same path, from the chunks.
       final late = await join(o, aliceId, deviceId: 'tablet');
       expect(late.dogPath(runId), hasLength(11));
       expect(late.runProgress(runId)!.progress, closeTo(400, 2));
@@ -492,46 +507,98 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       await eventually(() => events[a]!.whereType<RunRemoved>().isNotEmpty && a.runs.isEmpty);
     });
 
-    test('trace modes, buffered recording and flush on close', () async {
+    test('concurrent compaction by two editors loses no point', () async {
       final o = await create();
-      final a = await join(o, aliceId, traceFlushInterval: const Duration(hours: 1));
+      await o.addEditor(bobId.id);
+      final a = await join(o, aliceId);
+      final b = await join(o, bobId);
+      a.pathMode = PathMode.always;
+      await walk(a, [for (var m = 0.0; m < 300; m += 20) m]);
+      await eventually(() => o.path(aliceId.id).length == 15 && b.path(aliceId.id).length == 15);
+      if (h.clock != null) h.advance(const Duration(minutes: 3));
+      final minAge = h.clock == null ? Duration.zero : ProjectSession.defaultCompactAge;
+      final purged = await Future.wait([o.compactPaths(minAge: minAge), b.compactPaths(minAge: minAge)]);
+      // Whatever was not purged (the other compaction won a chunk) goes next time.
+      await o.compactPaths(minAge: minAge);
+      await b.compactPaths(minAge: minAge);
+      expect(purged.reduce((x, y) => x + y), greaterThanOrEqualTo(15));
+      await eventually(() => a.channel.items(PepCollections.pathPoint).isEmpty);
+      expect(a.path(aliceId.id), hasLength(15));
+    });
+
+    test('recorded paths survive a password change', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      final t = await o.publishTrack(gpx: lineGpx);
+      final runId = await o.putRun(Run(track: t.id, dog: 'Rex').withSource(aliceId.id, now()).start(now()));
+      await eventually(() => a.recordingPath);
+      await tick();
+      await walk(a, [for (var m = 0.0; m <= 120; m += 40) m]);
+      if (h.clock != null) h.advance(const Duration(minutes: 3));
+      await o.compactPaths(minAge: h.clock == null ? Duration.zero : ProjectSession.defaultCompactAge);
+      await walk(a, [160, 200]); // not compacted yet: compacted by the password change
+      await eventually(() => o.dogPath(runId).length == 6);
+
+      await o.changePassword('pw-2', kdf: fastKdf(c));
+      await eventually(() => a.locked);
+      await a.unlock('pw-2');
+      await eventually(() => a.dogPath(runId).length == 6, reason: 'chunks re-sealed, found by content');
+      expect(a.channel.items(PepCollections.pathPoint), isEmpty);
+      // The source goes on recording under the new key; everything merges.
+      await walk(a, [240]);
+      await eventually(() => o.dogPath(runId).length == 7);
+      expect(o.runProgress(runId)!.progress, closeTo(240, 2));
+    });
+
+    test('path modes, offline queue', () async {
+      final o = await create();
+      final t = h.transport();
+      final a = await join(o, aliceId, transport: t);
       await walk(a, [0]);
-      expect(a.recordingTrace, isFalse);
-      a.traceMode = TraceMode.always;
-      expect(a.recordingTrace, isTrue);
-      await walk(a, [10, 20]); // first one published at once, then buffered
-      await eventually(() => o.trace(aliceId.id).length == 1);
-      await a.flushTrace();
-      await eventually(() => o.trace(aliceId.id).length == 2);
-      await walk(a, [30]);
+      expect(a.recordingPath, isFalse);
+      a.pathMode = PathMode.always;
+      expect(a.recordingPath, isTrue);
+      await walk(a, [10]);
+      await eventually(() => o.path(aliceId.id).length == 1);
+
+      // No connection: positions fail, recorded points wait and keep their time.
+      await t.disconnect();
+      for (final m in [20.0, 30.0]) {
+        await expectLater(
+          a.publishPosition(Position(lat: north(m).lat, lon: north(m).lon, time: now(), accuracy: 5)),
+          throwsA(isA<TransportException>()),
+        );
+        await tick();
+      }
+      expect(a.pendingPathPoints, 2);
+      await t.connect();
+      await walk(a, [40]);
+      expect(a.pendingPathPoints, 0);
+      await eventually(() => o.path(aliceId.id).length == 4, reason: 'queued points published on reconnect');
+      final times = o.path(aliceId.id).map((p) => p.time).toList();
+      expect(times, orderedEquals([...times]..sort()));
+
       await a.publishPosition(Position(lat: 45.3, lon: 5.3, time: now(), accuracy: 500)); // too inaccurate
-      sessions.remove(a);
-      await a.close();
-      await eventually(() => o.trace(aliceId.id).length == 3, reason: 'flushed on close');
-      // A new session of the same device continues the segment of the hour.
-      final a2 = await join(o, aliceId);
-      a2.traceMode = TraceMode.always;
-      await walk(a2, [40]);
-      await eventually(() => o.trace(aliceId.id).length == 4);
-      expect(o.channel.items(PepCollections.trace), hasLength(1));
-      a2.traceMode = TraceMode.never;
-      await walk(a2, [50]);
+      a.pathMode = PathMode.never;
+      await walk(a, [50]);
       await settle();
-      expect(o.trace(aliceId.id), hasLength(4));
+      expect(o.path(aliceId.id), hasLength(4));
     });
 
     test('the owner adds collections missing from older projects', () async {
       final o = await create();
       final old = {...o.channel.acl.collections}
         ..remove(PepCollections.run)
-        ..remove(PepCollections.trace);
+        ..remove(PepCollections.path)
+        ..remove(PepCollections.pathPoint);
       await o.channel.updateAcl(collections: old);
       final a = await join(o, aliceId);
       expect(a.channel.acl.collections.containsKey(PepCollections.run), isFalse);
       await expectLater(a.ensureCollections(), throwsA(isA<AuthorizationException>()));
       await join(o, ownerId, deviceId: 'laptop');
       await eventually(() => a.channel.acl.collections.containsKey(PepCollections.run));
-      expect(a.channel.acl.collections[PepCollections.trace]!.writers, Writers.self);
+      expect(a.channel.acl.collections[PepCollections.pathPoint]!.writers, Writers.self);
+      expect(a.channel.acl.collections[PepCollections.path]!.writers, Writers.editors);
     });
 
     test('bot members', () async {

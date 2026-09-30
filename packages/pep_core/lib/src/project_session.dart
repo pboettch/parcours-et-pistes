@@ -9,11 +9,10 @@ import 'package:pep_content/pep_content.dart' hide utf8Bytes;
 import 'collections.dart';
 import 'project.dart';
 import 'session_events.dart';
-import 'trace_recorder.dart';
 import 'track.dart';
 
-/// When a session records its own positions into its path (`trace`).
-enum TraceMode {
+/// When a session records its own positions into its path ([PepCollections.pathPoint]).
+enum PathMode {
   never,
 
   /// While this member is the designated position source of an unfinished
@@ -31,10 +30,14 @@ enum TraceMode {
 /// content. Items of collections it does not know (content types added by
 /// newer app versions) are ignored.
 class ProjectSession {
-  ProjectSession._(this.channel, this.deviceId, DateTime Function()? clock, Duration traceFlushInterval)
+  ProjectSession._(this.channel, this.deviceId, DateTime Function()? clock, Duration? compactInterval)
     : _clock = clock ?? DateTime.now {
-    _recorder = TraceRecorder(channel, deviceId: deviceId, flushInterval: traceFlushInterval);
     _sub = channel.events.listen(_onChannelEvent);
+    if (compactInterval != null) {
+      _compactTimer = Timer.periodic(compactInterval, (_) {
+        if (canEditTracks) unawaited(compactPaths().then((_) {}, onError: (Object _) {}));
+      });
+    }
   }
 
   /// Creates a new project owned by [identity].
@@ -53,7 +56,7 @@ class ProjectSession {
     DateTime Function()? clock,
     Duration pruneInterval = const Duration(seconds: 15),
     String? deviceId,
-    Duration traceFlushInterval = defaultTraceFlushInterval,
+    Duration? compactInterval = defaultCompactInterval,
   }) async {
     final channel = await SecureChannel.create(
       crypto: crypto,
@@ -72,7 +75,7 @@ class ProjectSession {
       PepCollections.infoId,
       ProjectInfo(name: name, description: description, discipline: discipline).encode(),
     );
-    return ProjectSession._(channel, deviceId, clock, traceFlushInterval);
+    return ProjectSession._(channel, deviceId, clock, compactInterval);
   }
 
   /// Joins an existing project from its invitation [link] and [password].
@@ -93,7 +96,7 @@ class ProjectSession {
     DateTime Function()? clock,
     Duration pruneInterval = const Duration(seconds: 15),
     String? deviceId,
-    Duration traceFlushInterval = defaultTraceFlushInterval,
+    Duration? compactInterval = defaultCompactInterval,
   }) async {
     final channel = await SecureChannel.join(
       crypto: crypto,
@@ -105,7 +108,7 @@ class ProjectSession {
       clock: clock,
       pruneInterval: pruneInterval,
     );
-    final s = ProjectSession._(channel, deviceId, clock, traceFlushInterval);
+    final s = ProjectSession._(channel, deviceId, clock, compactInterval);
     if (s._projectOrNull == null) {
       await s.close(clearPosition: false);
       throw const ChannelNotFoundException('no valid project information in the channel');
@@ -122,16 +125,28 @@ class ProjectSession {
   /// one position per member.
   final String? deviceId;
 
-  static const defaultTraceFlushInterval = Duration(seconds: 30);
+  /// How often the sessions of the owner and editors compact recorded paths.
+  static const defaultCompactInterval = Duration(minutes: 5);
+
+  /// Recorded points younger than this are left for a later compaction (they
+  /// may still be arriving from a device that was offline).
+  static const defaultCompactAge = Duration(minutes: 2);
 
   /// Positions less accurate than this (m) are not recorded into the path.
-  static const traceMaxAccuracy = 50.0;
+  static const pathMaxAccuracy = 50.0;
 
   /// When this session records its positions into its path.
-  TraceMode traceMode = TraceMode.whenSource;
+  PathMode pathMode = PathMode.whenSource;
 
   final DateTime Function() _clock;
-  late final TraceRecorder _recorder;
+  Timer? _compactTimer;
+  var _compacting = false;
+
+  /// Path points not yet published (the transport was down), oldest first.
+  final _pendingPath = <Position>[];
+
+  /// Member id by compacted path chunk id, to name removed chunks.
+  final _chunkOwners = <String, String>{};
 
   /// Member id by self item id (pseudonym), to name removed items.
   final _selfOwners = <String, String>{};
@@ -180,20 +195,33 @@ class ProjectSession {
   /// Runs by id.
   Map<String, Run> get runs => _all(PepCollections.run, (i) => _decode(i, Run.decode));
 
-  /// Whether this session currently records its positions (see [traceMode]).
-  bool get recordingTrace => switch (traceMode) {
-    TraceMode.never => false,
-    TraceMode.always => true,
-    TraceMode.whenSource => runs.values.any((r) => r.status != RunStatus.finished && r.source == memberId),
+  /// Whether this session currently records its positions (see [pathMode]).
+  bool get recordingPath => switch (pathMode) {
+    PathMode.never => false,
+    PathMode.always => true,
+    PathMode.whenSource => runs.values.any((r) => r.status != RunStatus.finished && r.source == memberId),
   };
 
-  /// The recorded path of [memberId] (all devices), in time order.
-  List<TimedPoint> trace(String memberId) {
-    final out = <TimedPoint>[
-      for (final i in channel.items(PepCollections.trace).values)
-        if (i.signerId == memberId) ...?_decode(i, _tracePoints),
-    ]..sort((a, b) => a.time.compareTo(b.time));
-    return out;
+  /// Recorded positions not yet published because the transport was down;
+  /// they are published with the next position (or on [close]).
+  int get pendingPathPoints => _pendingPath.length;
+
+  /// The recorded path of [memberId] (all devices): compacted chunks and
+  /// single points, in time order.
+  List<TimedPoint> path(String memberId) {
+    final byMs = <int, TimedPoint>{};
+    for (final i in channel.items(PepCollections.path).values) {
+      final (member, points) = _decode(i, _chunk) ?? ('', const <TimedPoint>[]);
+      if (member != memberId) continue;
+      for (final p in points) {
+        byMs[p.time.millisecondsSinceEpoch] = p;
+      }
+    }
+    for (final i in channel.items(PepCollections.pathPoint).values) {
+      if (i.signerId != memberId) continue;
+      if (_decode(i, _pathPoint) case final p?) byMs[p.time.millisecondsSinceEpoch] = p;
+    }
+    return byMs.values.toList()..sort((a, b) => a.time.compareTo(b.time));
   }
 
   /// The path of the dog of run [runId]: the recorded paths and live
@@ -204,7 +232,7 @@ class ProjectSession {
     final out = <TimedPoint>[];
     for (final (member, from, until) in run.sourceIntervals) {
       bool within(DateTime t) => !t.isBefore(from) && (until == null || t.isBefore(until));
-      final part = trace(member).where((p) => within(p.time)).toList();
+      final part = path(member).where((p) => within(p.time)).toList();
       final live = positions[member];
       if (live != null && within(live.time) && (part.isEmpty || live.time.isAfter(part.last.time))) {
         part.add(TimedPoint(live.lat, live.lon, live.time));
@@ -275,10 +303,12 @@ class ProjectSession {
   Future<void> acceptOwnership() => channel.acceptOwnership();
 
   /// Shares this device's position, and records it into this member's path
-  /// when [recordingTrace].
+  /// when [recordingPath]. Recorded positions that cannot be published (no
+  /// connection) are kept and published with the next position.
   Future<void> publishPosition(Position position) async {
+    if (recordingPath && (position.accuracy ?? 0) <= pathMaxAccuracy) _pendingPath.add(position);
+    await _flushPath();
     await channel.put(PepCollections.position, channel.selfItemId(device: deviceId), position.encode());
-    if (recordingTrace && (position.accuracy ?? 0) <= traceMaxAccuracy) await _recorder.add(position);
   }
 
   Future<void> clearPosition() => channel.delete(PepCollections.position, channel.selfItemId(device: deviceId));
@@ -322,11 +352,75 @@ class ProjectSession {
     if (missing.isNotEmpty) await channel.updateAcl(collections: {...current, ...missing});
   }
 
-  /// Publishes the positions recorded but not yet published.
-  Future<void> flushTrace() => _recorder.flush();
+  /// Owner and editors: merges the recorded points older than [minAge] into
+  /// per-member chunks of [PepCollections.pathSlot], then purges the points
+  /// now held by a chunk (checked after a sync, so that concurrent compactions
+  /// by several editors never lose a point). Returns the number of points
+  /// purged. Runs periodically in the sessions of the owner and editors.
+  Future<int> compactPaths({Duration minAge = defaultCompactAge}) async {
+    if (!canEditTracks) throw const AuthorizationException('only the owner and editors can compact paths');
+    if (_compacting) return 0;
+    _compacting = true;
+    try {
+      final cutoff = _now().subtract(minAge);
+      // Chunk id from the member's current pseudonym and the slot: concurrent
+      // compactions converge on the same item. (After a password change the
+      // pseudonym differs; chunks name their member inside, readers merge.)
+      final groups = <String, List<(String, TimedPoint)>>{}; // chunk id → (point item id, point)
+      final members = <String, String>{}; // chunk id → member
+      for (final i in channel.items(PepCollections.pathPoint).values) {
+        final p = _decode(i, _pathPoint);
+        if (p == null || p.time.isAfter(cutoff)) continue;
+        final slot = p.time.millisecondsSinceEpoch ~/ PepCollections.pathSlot.inMilliseconds;
+        final chunkId = '${channel.selfItemIdOf(i.signerId)}.q$slot';
+        (groups[chunkId] ??= []).add((i.id, p));
+        members[chunkId] = i.signerId;
+      }
+      if (groups.isEmpty) return 0;
+      for (final MapEntry(key: chunkId, value: points) in groups.entries) {
+        final byMs = {for (final p in _storedChunk(chunkId)) p.time.millisecondsSinceEpoch: p};
+        final before = byMs.length;
+        for (final (_, p) in points) {
+          byMs[p.time.millisecondsSinceEpoch] = p;
+        }
+        if (byMs.length == before) continue;
+        final all = byMs.values.toList()..sort((a, b) => a.time.compareTo(b.time));
+        final gpx = Gpx(
+          metadataExtensions: [
+            pepElement(_chunkElement, attributes: {'member': members[chunkId]!}),
+          ],
+          tracks: [
+            GpxTrack(
+              segments: [
+                [for (final p in all) GpxPoint(p.lat, p.lon, time: p.time)],
+              ],
+            ),
+          ],
+        );
+        await channel.put(PepCollections.path, chunkId, utf8Bytes(gpx.toXml(pretty: false)));
+      }
+      await channel.sync();
+      var purged = 0;
+      for (final MapEntry(key: chunkId, value: points) in groups.entries) {
+        final stored = {for (final p in _storedChunk(chunkId)) p.time.millisecondsSinceEpoch};
+        for (final (id, p) in points) {
+          if (!stored.contains(p.time.millisecondsSinceEpoch)) continue; // another compaction won: next time
+          await channel.purge(PepCollections.pathPoint, id);
+          purged++;
+        }
+      }
+      return purged;
+    } finally {
+      _compacting = false;
+    }
+  }
 
-  /// Owner only; see [SecureChannel.changePassword].
-  Future<void> changePassword(String newPassword, {KdfParams? kdf}) => channel.changePassword(newPassword, kdf: kdf);
+  /// Owner only; see [SecureChannel.changePassword]. Recorded path points
+  /// are compacted first: members' own items do not survive the change.
+  Future<void> changePassword(String newPassword, {KdfParams? kdf}) async {
+    if (isOwner && !locked) await compactPaths(minAge: Duration.zero);
+    await channel.changePassword(newPassword, kdf: kdf);
+  }
 
   Future<void> unlock(String password) => channel.unlock(password);
 
@@ -336,7 +430,7 @@ class ProjectSession {
 
   /// Owner only: removes the project from the broker and closes the session.
   Future<void> deleteProject() async {
-    _recorder.cancel();
+    _pendingPath.clear();
     await channel.deleteChannel();
     await _shutdown();
   }
@@ -344,9 +438,9 @@ class ProjectSession {
   /// Stops syncing; by default clears the position shared by this session.
   Future<void> close({bool clearPosition = true}) async {
     try {
-      await _recorder.flush();
+      await _flushPath();
     } on PepException {
-      _recorder.cancel(); // e.g. locked: keeps what was published
+      // e.g. locked: what could not be published is lost
     }
     await channel.close(clearEphemeral: clearPosition);
     await _shutdown();
@@ -362,12 +456,51 @@ class ProjectSession {
     await putRun(change(run), id: runId);
   }
 
-  static List<TimedPoint> _tracePoints(Uint8List body) => [
-    for (final p in Gpx.parse(utf8.decode(body)).tracks.expand((t) => t.points))
-      if (p.time != null) TimedPoint(p.lat, p.lon, p.time!),
-  ];
+  /// Publishes the pending path points, oldest first; stops (keeping them)
+  /// when the transport is down.
+  Future<void> _flushPath() async {
+    while (_pendingPath.isNotEmpty) {
+      final p = _pendingPath.first;
+      var suffix = 'p${p.time.millisecondsSinceEpoch.toRadixString(36)}${deviceId == null ? '' : '-$deviceId'}';
+      if (suffix.length > 32) suffix = suffix.substring(0, 32);
+      try {
+        await channel.put(PepCollections.pathPoint, channel.selfItemId(device: suffix), p.encode());
+      } on TransportException {
+        return;
+      }
+      _pendingPath.removeAt(0);
+    }
+  }
+
+  List<TimedPoint> _storedChunk(String chunkId) {
+    final item = channel.item(PepCollections.path, chunkId);
+    return item == null ? const [] : _decode(item, _chunk)?.$2 ?? const [];
+  }
+
+  /// `<pep:path member="…"/>` in the metadata of a compacted path chunk.
+  static const _chunkElement = 'path';
+
+  static TimedPoint _pathPoint(Uint8List body) {
+    final p = Position.decode(body);
+    return TimedPoint(p.lat, p.lon, p.time);
+  }
+
+  /// A compacted path chunk: (member id, points).
+  static (String, List<TimedPoint>) _chunk(Uint8List body) {
+    final gpx = Gpx.parse(utf8.decode(body));
+    final member = gpx.metadataExtensions.pep(_chunkElement)?.getAttribute('member');
+    if (member == null) throw const ContentFormatException('path chunk without member');
+    return (
+      member,
+      [
+        for (final p in gpx.tracks.expand((t) => t.points))
+          if (p.time != null) TimedPoint(p.lat, p.lon, p.time!),
+      ],
+    );
+  }
 
   Future<void> _shutdown() async {
+    _compactTimer?.cancel();
     await _sub.cancel();
     if (!_events.isClosed) await _events.close();
   }
@@ -433,8 +566,10 @@ class ProjectSession {
             if (_selfOwners[id] case final m? when !positions.containsKey(m)) _emit(PositionRemoved(m));
           case PepCollections.run:
             _emit(RunRemoved(id));
-          case PepCollections.trace:
-            if (_selfOwners[id] case final m?) _emit(TraceUpdated(m));
+          case PepCollections.pathPoint:
+            if (_selfOwners[id] case final m?) _emit(PathUpdated(m));
+          case PepCollections.path:
+            if (_chunkOwners[id] case final m?) _emit(PathUpdated(m));
         }
       case ch.PasswordChanged():
         _emit(const PasswordChanged());
@@ -447,7 +582,7 @@ class ProjectSession {
 
   void _onItem(ChannelItem item) {
     final topic = channel.topics.item(item.collection, item.id);
-    if (const {PepCollections.member, PepCollections.position, PepCollections.trace}.contains(item.collection)) {
+    if (const {PepCollections.member, PepCollections.position, PepCollections.pathPoint}.contains(item.collection)) {
       _selfOwners[item.id] = item.signerId;
     }
     SessionEvent? event;
@@ -467,8 +602,13 @@ class ProjectSession {
       case PepCollections.run:
         final r = _decode(item, Run.decode);
         if (r != null) event = RunUpdated(item.id, r);
-      case PepCollections.trace:
-        if (_decode(item, _tracePoints) != null) event = TraceUpdated(item.signerId);
+      case PepCollections.pathPoint:
+        if (_decode(item, _pathPoint) != null) event = PathUpdated(item.signerId);
+      case PepCollections.path:
+        if (_decode(item, _chunk) case (final m, _)) {
+          _chunkOwners[item.id] = m;
+          event = PathUpdated(m);
+        }
       default:
         return; // content type unknown to this version: ignored
     }

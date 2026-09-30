@@ -296,6 +296,24 @@ class SecureChannel {
     }
   }
 
+  /// Clears the retained message of item [id], leaving no tombstone: for items
+  /// superseded by others (e.g. single positions merged into a chunk). The
+  /// owner and editors may purge any item; members the items they can write.
+  ///
+  /// Removals are not authenticated (anyone knowing the topic can clear a
+  /// retained message at the broker); this check only keeps honest clients
+  /// from purging what they have no business with.
+  Future<void> purge(String collection, String id) async {
+    if (locked || _acl == null) throw const AuthorizationException('channel is locked');
+    final a = _acl!;
+    if (!(_me.id == a.ownerId || a.editors.contains(_me.id) || _canWrite(_me.id, collection, id))) {
+      throw AuthorizationException('not allowed to purge $collection/$id');
+    }
+    final topic = topics.item(collection, id);
+    await _publish(topic, Uint8List(0));
+    _ownEphemeral.remove(topic);
+  }
+
   /// Owner only: replaces editors and/or collections of the access list.
   Future<void> updateAcl({Set<String>? editors, Map<String, CollectionPolicy>? collections}) async {
     _requireOwner();
