@@ -101,7 +101,8 @@ before the user decides.
 **Multi-device (user, 2026-10-18):** same user on several devices = **identity copied** (not
 certified device keys). Activating a new device = `IdentityBackup` (passphrase-protected text/QR),
 **no transfer over the broker**: a broker-relayed `LinkRequest` was built and then removed at the
-user's request ("no link-request over the broker").
+user's request ("no link-request over the broker"). User's framing: `IdentityBackup` = an identity
+*export*, used (1) for backup storage and (2) to enable another device.
 
 **Focus (user, 2026-10-18):** "forget the PoC for the moment, we only work on the low-level lib" —
 work on pep_channel/pep_content/pep_core, leave apps/pep_app alone unless asked (keep it compiling).
