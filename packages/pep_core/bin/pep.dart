@@ -33,10 +33,6 @@ Future<void> main(List<String> argv) async {
     ..addCommand('identity', _common()..addOption('passphrase', help: 'Backup passphrase (else prompt)'))
     ..addCommand('owner', _common())
     ..addCommand(
-      'link',
-      _common()..addOption('passphrase', help: 'Second-factor password (send: set it; receive: type it)'),
-    )
-    ..addCommand(
       'create',
       _common()
         ..addOption('name', mandatory: true)
@@ -132,38 +128,6 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
         default:
           throw const FormatPepException('usage: pep identity export | import <backup>');
       }
-      return;
-
-    case 'link':
-      // Same user on several devices: receive prints a link for the other
-      // device and waits; send gives this identity to the device showing it.
-      final broker = opt('broker') ?? _defaultBroker;
-      final t = Mqtt5Transport(
-        BrokerConfig(Uri.parse(broker), username: opt('user'), password: opt('broker-password')),
-      );
-      switch (rest) {
-        case ['receive']:
-          final req = LinkRequest.create(crypto, broker: broker);
-          print(req.uri);
-          stderr.writeln('code ${req.code}; waiting for the other device…');
-          final got = await req.receive(crypto, t);
-          final id = got.open(
-            crypto,
-            password: got.needsPassword ? (cmd.option('passphrase') ?? _prompt('password: ')) : null,
-          );
-          _saveIdentity(id.identity, opt('identity') ?? _defaultIdentityPath());
-          print(id.identity.id);
-          stderr.writeln('this device now uses identity ${id.identity.fingerprint}');
-          req.dispose();
-        case ['send', final uri]:
-          final req = LinkRequest.parse(uri);
-          stderr.writeln('code ${req.code}: check that the other device shows the same');
-          await req.send(crypto, t, me, password: cmd.option('passphrase'));
-          stderr.writeln('identity sent');
-        default:
-          throw const FormatPepException('usage: pep link receive | send <link>');
-      }
-      await t.disconnect();
       return;
 
     case 'create':
@@ -493,8 +457,6 @@ Never _usage(ArgParser p, [String? error]) {
 commands:
   id                                  print this identity's member id (and fingerprint)
   identity export | import <backup>   passphrase-protected identity backup (copy to other devices)
-  link receive | send <link> [--passphrase P]   pair a device: receive shows a link and waits,
-                                      send gives this identity to it (P: optional second factor)
   create --name N [--discipline ru|mt] [--gpx f]...   create a project, print its join link
   info <link>                         show project and tracks
   watch <link>                        follow tracks, members and positions live

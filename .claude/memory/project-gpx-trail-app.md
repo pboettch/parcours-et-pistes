@@ -98,13 +98,13 @@ A dedicated service remains an open idea for later. Poseur use of the one-track 
 position and know where to put the objects (track *recording* comes later). Don't implement these
 before the user decides.
 
-**Multi-device (user, 2026-10-18):** same user on phone + website = **pairing, identity copied**
-(not certified device keys): `LinkRequest` in pep_channel (QR/link + 6-digit code, sealed to an
-ephemeral key, optional password as second factor, app data = projects + name); app Settings →
-"Mes appareils"; CLI `pep link receive|send`.
+**Multi-device (user, 2026-10-18):** same user on several devices = **identity copied** (not
+certified device keys). Activating a new device = `IdentityBackup` (passphrase-protected text/QR),
+**no transfer over the broker**: a broker-relayed `LinkRequest` was built and then removed at the
+user's request ("no link-request over the broker").
 
 **Focus (user, 2026-10-18):** "forget the PoC for the moment, we only work on the low-level lib" —
-work on pep_channel/pep_content/pep_core, leave apps/pep_app alone unless asked.
+work on pep_channel/pep_content/pep_core, leave apps/pep_app alone unless asked (keep it compiling).
 
 **Gotchas learned:** Flutter web in the Browser pane: debug (DDC) builds are slow/flaky → use the
 release `app.sh serve`; the pane caches `localhost` → open `127.0.0.1:8686/?v=N`; coordinate clicks

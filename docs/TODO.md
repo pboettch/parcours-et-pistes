@@ -12,13 +12,9 @@ Still PoC-grade: storage unencrypted in the browser, French strings inline, no Q
       secure storage (Keychain / Keystore / web: encrypted IndexedDB).
 - [ ] Generate a **device id** once per installation (`[A-Za-z0-9_-]{1,32}`) and pass it as
       `deviceId` to `ProjectSession.create/join` (positions per device).
-- [x] Add a device (same user on phone and web): device linking, `LinkRequest` — web PoC shows the
-      QR code / link and the code, sends by pasting the link (decision 2026-10-18: pairing,
-      identity copied, optional password as second factor).
-- [ ] Phone app: scan the link QR code (camera); deep link (https URL to the web app carrying the
-      link in its fragment) so that a phone camera app can open it directly.
-- [ ] Backup: `IdentityBackup.export` as a file / QR code. Explain that a lost device means
-      creating a new identity (one identity per user, copied — decision of 2026-09-29).
+- [ ] Backup / move to another device: `IdentityBackup.export` shown as a QR code (and as text),
+      `IdentityBackup.import` by scanning it. Explain that a lost device means creating a new
+      identity (one identity per user, copied — decision of 2026-09-29).
 - [ ] Show the user's own fingerprint (`Identity.fingerprint`).
 
 ## Friends (contacts)

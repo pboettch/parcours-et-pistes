@@ -27,9 +27,6 @@ class Identity {
   }
 
   static const publicKeyBytes = 32;
-
-  /// Length of an exported seed ([exportSeed]).
-  static const seedBytes = 32;
   static const signatureBytes = 64;
 
   final PepCrypto _c;

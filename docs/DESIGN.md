@@ -58,15 +58,6 @@ parameters takes ~75 ms in Chromium, ~20 ms on the Dart VM (2026 desktop hardwar
   the user's other devices** with `IdentityBackup` (Argon2id + XChaCha20-Poly1305 under a
   passphrase, ~130 characters, QR-friendly). A lost device means the identity must be considered
   compromised: the user creates a new one and is re-added by friends and projects.
-- **Device linking** (`LinkRequest`, the usual way to add a device — phone + website): the new
-  device shows `parcoursetpistes://link#l=<link id>&k=<ephemeral X25519 key>&b=<broker>` as a QR
-  code or text, plus a 6-digit code derived from it; the existing device, after the user compared
-  the codes, publishes the identity seed and opaque app data (the app sends its projects with
-  their passwords and the display name) **sealed to the ephemeral key** — and, if the user chose
-  a password (second factor), also encrypted with Argon2id(password), so that a QR code shown by
-  someone else is useless without it. The transfer is a retained message on
-  `<base>/link/<link id>` with a 15-minute expiry, cleared by the receiver. No accounts, no
-  server, no user password otherwise.
 - `fingerprintOf(memberId)`: 80 bits of SHA-256 as `XXXX-XXXX-XXXX-XXXX` (Crockford base32),
   for people to compare when adding each other.
 - **Owner**: the project creator. Signs `meta` and the access list.
