@@ -43,6 +43,9 @@ see [[project-gui-direction]]).
 `pep` CLI and `.claude/scripts/e2e.sh` pass; web GUI PoC on the unmerged branch `poc-web`.
 PR #2 (branch `app-poc`, libraries + tooling only, app removed) brings runs, dog path, `purge`.
 
+**PR #2 under the user's review (2026-10-18):** they will go through the branch in a new session —
+"there are things I don't like"; wait for their points before changing or merging anything.
+
 **Open topics:** dog-path bugs from the first review ([[project-runs-dog-path]]); IdentityBackup helpers ([[project-identity-devices]]); RU details from the user;
 default production broker + wildcard restriction; background location; app deep-link domain.
 
