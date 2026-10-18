@@ -98,6 +98,11 @@ A dedicated service remains an open idea for later. Poseur use of the one-track 
 position and know where to put the objects (track *recording* comes later). Don't implement these
 before the user decides.
 
+**Multi-device (user, 2026-10-18):** same user on phone + website = **pairing, identity copied**
+(not certified device keys): `LinkRequest` in pep_channel (QR/link + 6-digit code, sealed to an
+ephemeral key, optional password as second factor, app data = projects + name); app Settings →
+"Mes appareils"; CLI `pep link receive|send`.
+
 **Gotchas learned:** Flutter web in the Browser pane: debug (DDC) builds are slow/flaky → use the
 release `app.sh serve`; the pane caches `localhost` → open `127.0.0.1:8686/?v=N`; coordinate clicks
 get lost on the canvas → semantics are on (`ensureSemantics`), click via `find` refs; the pane

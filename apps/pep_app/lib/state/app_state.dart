@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -255,6 +256,78 @@ class AppState extends ChangeNotifier {
     final p = current;
     if (p != null) {
       await open(p);
+    } else {
+      notifyListeners();
+    }
+  }
+
+  // -------------------------------------------------------- device link
+
+  /// New device: a request to show (QR code / text) to the user's other device.
+  LinkRequest createLinkRequest() => LinkRequest.create(crypto, broker: defaultBroker);
+
+  /// New device: waits for the transfer sent by the other device.
+  Future<LinkTransfer> waitForLink(LinkRequest r) async {
+    final t = _transport(r.broker ?? defaultBroker);
+    try {
+      return await r.receive(crypto, t);
+    } finally {
+      await t.disconnect();
+    }
+  }
+
+  /// Existing device: sends this identity, and optionally the known projects
+  /// (with their passwords) and the display name, to the device that shows
+  /// [uri]. [password]: second factor the other device must type.
+  Future<void> sendLink(String uri, {String? password, bool withProjects = true}) async {
+    final r = LinkRequest.parse(uri);
+    final bundle = {
+      'v': 1,
+      if (displayName.isNotEmpty) 'name': displayName,
+      if (withProjects) 'projects': [for (final p in projects) p.toJson()],
+    };
+    final t = _transport(r.broker ?? defaultBroker);
+    try {
+      await r.send(crypto, t, identity, password: password, data: utf8Bytes(jsonEncode(bundle)));
+    } finally {
+      await t.disconnect();
+    }
+  }
+
+  /// What a received link contains, to confirm before applying it. Throws
+  /// [WrongPasswordException].
+  ({Identity identity, String? name, List<SavedProject> projects}) readLink(LinkTransfer t, {String? password}) {
+    final got = t.open(crypto, password: password);
+    var bundle = const <String, dynamic>{};
+    try {
+      bundle = jsonDecode(utf8.decode(got.data)) as Map<String, dynamic>;
+    } on FormatException {
+      // identity only
+    }
+    return (
+      identity: got.identity,
+      name: bundle['name'] as String?,
+      projects: [
+        for (final j in bundle['projects'] as List<dynamic>? ?? const [])
+          SavedProject.fromJson(j as Map<String, dynamic>),
+      ],
+    );
+  }
+
+  /// Becomes the same user as the other device: its identity, its projects
+  /// (merged with this device's) and its name if this device has none.
+  Future<void> applyLink(({Identity identity, String? name, List<SavedProject> projects}) link) async {
+    identity = link.identity;
+    storage.saveIdentity(identity);
+    final mine = {for (final p in projects) p.projectId: p};
+    for (final p in link.projects) {
+      mine[p.projectId] = p;
+    }
+    storage.projects = mine.values.toList();
+    if (displayName.isEmpty && link.name != null) storage.displayName = link.name;
+    final reopen = current ?? (link.projects.isEmpty ? null : link.projects.first);
+    if (reopen != null) {
+      await open(mine[reopen.projectId] ?? reopen);
     } else {
       notifyListeners();
     }

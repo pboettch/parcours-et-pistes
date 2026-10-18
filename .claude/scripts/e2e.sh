@@ -81,6 +81,13 @@ grep -Eq "^[1-9][0-9]* path points merged" "$work/compact.txt"
 [[ $(mosquitto_sub -V mqttv5 -p 18883 -t "pep/v1/$pid/path_pt/#" -W 1 -F '%t' 2>/dev/null | wc -l) -eq 0 ]] && echo "no single points left"
 pep run "$link" "${A[@]}" -p pw1 list | grep -E "finished, source Tractive .*, (9[0-9]|100)%"
 
+step "alice links a second device (pairing, with a second-factor password)"
+pep link receive --identity "$work/alice-web.id" --passphrase "facteur-2" > "$work/link.txt" 2> "$work/link.err" & link_pid=$!
+for _ in $(seq 1 50); do [[ -s "$work/link.txt" ]] && break; sleep 0.2; done
+pep link send "$(head -1 "$work/link.txt")" "${A[@]}" --passphrase "facteur-2"
+wait $link_pid
+[[ $(tail -1 "$work/link.txt") == "$alice" ]] && echo "the web device is alice too ($(grep code "$work/link.err"))"
+
 step "broker view (admin wildcard): only meta is plaintext, no member ids in topics"
 mosquitto_sub -V mqttv5 -p 18883 -t "pep/v1/$pid/#" -W 1 -F '%t %l bytes, starts with: %x' 2>/dev/null \
   | sed -E 's/(starts with: .{16}).*/\1…/' || true
