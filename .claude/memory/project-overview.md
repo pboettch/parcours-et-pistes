@@ -36,12 +36,12 @@ The official RU trail sheet (organizers' part + judge's part, printable document
 placeholders only (`TrailInfo`).
 
 **Focus (user, 2026-10-18):** "forget the PoC for the moment, we only work on the low-level lib";
-the app layer for the three platforms comes soon. Leave `apps/pep_app` alone unless asked (keep it
-compiling).
+the app layer for the three platforms comes soon. The web PoC is not on `main` (branch `poc-web`,
+see [[project-gui-direction]]).
 
 **Status (2026-10-18):** libraries complete and tested (VM + Chromium, memory broker + mosquitto),
-`pep` CLI and `.claude/scripts/e2e.sh` pass; web GUI PoC exists. Work of 2026-09-30..10-18 on
-branch `app-poc` (runs, dog path, PoC, IdentityBackup decisions).
+`pep` CLI and `.claude/scripts/e2e.sh` pass; web GUI PoC on the unmerged branch `poc-web`.
+PR #2 (branch `app-poc`, libraries + tooling only, app removed) brings runs, dog path, `purge`.
 
 **Open topics:** dog-path bugs from the first review ([[project-runs-dog-path]]); IdentityBackup helpers ([[project-identity-devices]]); RU details from the user;
 default production broker + wildcard restriction; background location; app deep-link domain.

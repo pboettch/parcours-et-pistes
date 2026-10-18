@@ -35,6 +35,5 @@ section before changing behaviour, and update it in the same commit.
 - `dart format` (page width 120), `dart analyze --fatal-infos packages`.
 - `.claude/scripts/test.sh [-P pkg]` (VM + Chromium; broker tests need `broker.sh start`).
 - `.claude/scripts/e2e.sh` when the CLI or session behaviour changed.
-- `apps/pep_app` must still compile (`flutter analyze` there) after API changes.
 - For changes to crypto, envelope, ACL, topics or session semantics, have the
   `protocol-reviewer` agent review the diff before committing, and address what it finds.

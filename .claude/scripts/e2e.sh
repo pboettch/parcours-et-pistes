@@ -53,10 +53,10 @@ pep editor "${O[@]}" -p pw1 "$link" add -- "$alice"
 pep push "$link" "${A[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Variante Alice"
 
 step "owner pushes a hidden track, then shares it with alice"
-hidden=$(pep push "$link" "${O[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Piste cachée" --visible-to "$owner_dummy" | cut -d' ' -f1)
+hidden=$(pep push "$link" "${O[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Piste cachée" --visible-to="$owner_dummy" | cut -d' ' -f1)
 ! pep info "$link" "${A[@]}" -p pw1 | grep -q "Piste cachée"
 echo "alice does not see it"
-pep push "$link" "${O[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Piste cachée" --id "$hidden" --visible-to "$alice"
+pep push "$link" "${O[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Piste cachée" --id "$hidden" --visible-to="$alice"
 pep info "$link" "${A[@]}" -p pw1 | grep "Piste cachée"
 
 step "alice backs up her identity and restores it on a 'new device'"
@@ -70,7 +70,7 @@ step "a run: the owner designates the collar bot as the dog's position; simulate
 bot=$(pep id "${B[@]}" | tail -1)
 pep name "$link" "${B[@]}" -p pw1 --bot "Tractive"
 line=$(pep push "$link" "${O[@]}" -p pw1 --gpx "$work/line.gpx" | cut -d' ' -f1)
-run=$(pep run "$link" "${O[@]}" -p pw1 add --track "$line" --dog Rex --handler Ana --source "$bot" | tail -1)
+run=$(pep run "$link" "${O[@]}" -p pw1 add --track "$line" --dog Rex --handler Ana --source="$bot" | tail -1)
 pep run "$link" "${O[@]}" -p pw1 start "$run"
 pep replay "$link" "${B[@]}" -p pw1 "$work/line.gpx" --speed 2 --rate 50 --interval 5
 pep run "$link" "${A[@]}" -p pw1 list | tee "$work/run.txt"

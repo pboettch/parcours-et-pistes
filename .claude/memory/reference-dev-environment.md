@@ -20,7 +20,8 @@ use multiplication, not `<<`, for u32.
 test 1.31 `CHROME_EXECUTABLE` is ignored when dart_test.yaml overrides chrome settings
 (`test.sh` adds a `google-chrome` shim). CI uses the Flutter SDK.
 
-**Flutter web in the Browser pane:** debug (DDC) builds are slow/flaky → release `app.sh serve`;
+**Flutter web in the Browser pane** (learned on branch `poc-web`): debug (DDC) builds are slow/flaky →
+release build (`app.sh serve` there);
 the pane caches `localhost` → open `127.0.0.1:8686/?v=N`; coordinate clicks get lost on the
 canvas → semantics on, click via `find` refs; the pane throttles requestAnimationFrame when
 unfocused, so grey tiles there are a rendering artefact — never "fix" them with TileLayer resets

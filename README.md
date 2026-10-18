@@ -17,16 +17,16 @@ Android and the web. Free and open source under the MIT license.
   - [`pep_content`](packages/pep_content) — content model: GPX with custom sections,
     positions, profiles, project info, runs; track geometry and progress matching;
   - [`pep_core`](packages/pep_core) — project sessions (the apps' API) and the `pep` CLI.
-- [`pep_app`](apps/pep_app) — Flutter app, GUI proof of concept on the web (map-first:
-  tracks, members, dogs on tracks with live progress); Android/iOS next.
+- Flutter apps (iOS, Android, web): next. A web GUI proof of concept lives on the unmerged branch
+  [`poc-web`](https://github.com/pboettch/parcours-et-pistes/tree/poc-web); parts of it will be reused.
 
 Design and protocol: [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Continuous integration
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and on pull
-requests (Flutter SDK, stable): `dart format` check, `dart analyze` / `flutter analyze`, the
-tests of each package on the Dart VM and in Chrome (broker tests against a mosquitto started in
-the job), a release web build of the app (artifact), and a line-coverage report shown
+requests (Flutter SDK, stable): `dart format` check, `dart analyze`, the tests of each package on
+the Dart VM and in Chrome (broker tests against a mosquitto started in the job), and a
+line-coverage report shown
 in the run summary (uploaded to Codecov when the `CODECOV_TOKEN` secret is set). Locally:
 `.claude/scripts/test.sh` and `.claude/scripts/coverage.sh`.
 

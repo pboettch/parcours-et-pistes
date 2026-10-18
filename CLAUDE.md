@@ -13,8 +13,8 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
   - `packages/pep_core/` — `ProjectSession` facade mapping content onto collections
     (`PepCollections`), the apps' API; `pep` CLI.
   Library rules and checks: `packages/CLAUDE.md`.
-- `apps/pep_app/` — Flutter app (workspace member), GUI PoC web-first, currently parked:
-  `apps/pep_app/CLAUDE.md`.
+- `apps/` — Flutter apps (next). A web GUI proof of concept lives on the unmerged branch `poc-web`
+  (parts will be reused; the real app's design will differ).
 - `tools/broker/` — development MQTT 5 broker setup.
 - `docs/DESIGN.md` — architecture, crypto, protocol, threat model.
 - `docs/TODO.md` — app-layer TODOs (friends, device sync, UI flows).
@@ -47,8 +47,6 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
 - `.claude/scripts/e2e.sh` — end-to-end CLI scenario (owner + participant) on the dev broker.
 - `dart run pep_core:pep --help` (in `packages/pep_core`) — CLI for manual testing.
 - `.claude/scripts/coverage.sh` — merged LCOV (`coverage/lcov.info`) + Markdown summary.
-- `.claude/scripts/app.sh [serve|run|build]` — web app on http://127.0.0.1:8686 (serve = release build,
-  also the Browser pane preview config in `.claude/launch.json`); fetches `sodium.js` (not versioned).
 - `dart run .claude/scripts/seed_cco.dart` — private example project from the local CCO site copy
   (see memory `reference-cco-prototype`); link/password saved outside the repo.
 - CI: `.github/workflows/ci.yml` (format, analyze, tests VM + Chrome with mosquitto, coverage).

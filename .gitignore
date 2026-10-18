@@ -20,4 +20,3 @@ tools/broker/certs/*.key
 packages/*/test/web/sodium.js
 tools/broker/certs/
 tools/broker/passwd
-apps/pep_app/web/sodium.js
