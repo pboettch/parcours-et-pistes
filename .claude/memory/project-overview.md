@@ -43,7 +43,7 @@ compiling).
 `pep` CLI and `.claude/scripts/e2e.sh` pass; web GUI PoC exists. Work of 2026-09-30..10-18 on
 branch `app-poc` (runs, dog path, PoC, IdentityBackup decisions).
 
-**Open topics:** IdentityBackup helpers ([[project-identity-devices]]); RU details from the user;
+**Open topics:** dog-path bugs from the first review ([[project-runs-dog-path]]); IdentityBackup helpers ([[project-identity-devices]]); RU details from the user;
 default production broker + wildcard restriction; background location; app deep-link domain.
 
 Related: [[project-identity-devices]], [[project-runs-dog-path]], [[project-gui-direction]],

@@ -18,6 +18,11 @@ under concurrent compaction). Chunks name their member inside (pseudonyms change
 password); the owner compacts before a password change. Limit: without an online editor the
 single points pile up. A dedicated tracking service stays an idea for later.
 
+**Open bugs (review 2026-10-18, `.claude/reviews/2026-10-18-dog-path.md`) — fix first in the next
+library session:** concurrent compaction can lose points (stale `_decode` cache + same-rev race);
+non-single-flight offline queue; path errors block the live position; password change can still
+lose points; offline queue only in memory (DESIGN.md overstates).
+
 **Progress** (`TrailProgress`, ported from the CCO prototype): distance to the track, confirmed
 start near the beginning, forward-only cursor, end when the path leaves for good.
 
