@@ -16,6 +16,7 @@ export 'src/crypto/identity_backup.dart';
 export 'src/crypto/kdf.dart';
 export 'src/crypto/pep_crypto.dart';
 export 'src/errors.dart';
+export 'src/link/device_link.dart';
 export 'src/protocol/ids.dart' show newUuid, newItemId, isChannelId, isTopicId;
 export 'src/protocol/join_link.dart';
 export 'src/protocol/topics.dart';
