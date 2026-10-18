@@ -14,6 +14,8 @@ metadata:
   position, with a menu for the rest. Web first for the PoC.
 
 **Web PoC (`apps/pep_app`)** exists but is **parked** (user, 2026-10-18): focus on the libraries.
+It **will not be merged as is** (user, 2026-10-18): the real app's design and functionality will
+differ; parts of the PoC will be reused.
 It runs on the private example project seeded from the CCO site ([[reference-cco-prototype]]).
 
 Related: [[project-overview]], [[reference-dev-environment]].
