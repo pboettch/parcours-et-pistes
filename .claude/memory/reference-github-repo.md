@@ -11,4 +11,4 @@ metadata:
   `gh run view <id> --log-failed`.
 - CI: `.github/workflows/ci.yml` (push to main + pull requests). First runs green on 2026-09-29.
   Codecov not yet set up (needs `CODECOV_TOKEN` secret); branch protection not yet configured.
-- Related: [[project-gpx-trail-app]], [[feedback-repo-conventions]].
+- Related: [[project-overview]], [[feedback-repo-conventions]].

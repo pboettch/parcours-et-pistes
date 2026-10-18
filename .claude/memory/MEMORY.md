@@ -1,4 +1,8 @@
-- [GPX trail app project](project-gpx-trail-app.md) — Parcours et Pistes: encrypted RU/MT trail sharing over MQTT; decisions, runs/dog source, web GUI PoC (apps/pep_app), gotchas
+- [Project overview](project-overview.md) — Parcours et Pistes: requirements, core decisions, package split, focus (libs), status
+- [Identity & devices](project-identity-devices.md) — one identity copied per device, IdentityBackup = export, no broker transfer, open IdentityExport proposal
+- [Runs & dog path](project-runs-dog-path.md) — designated position source, bots, retained points + leader compaction
+- [GUI direction](project-gui-direction.md) — overview window, single-track window (poseur/judge); web PoC parked
+- [Dev environment & gotchas](reference-dev-environment.md) — SDK, sodium, dev broker; library, CI and Flutter-web pitfalls
 - [Repo conventions](feedback-repo-conventions.md) — memories/Claude scripts live in repo `.claude/`, git-managed, commit often
 - [GitHub repo & CI](reference-github-repo.md) — pboettch/parcours-et-pistes, gh authenticated, CI workflow status
-- [CCO website prototype](reference-cco-prototype.md) — user's Leaflet GUI reference (trail cards, live map, dog progress); local copy ~/devel/cco-prototype, private data
+- [CCO website prototype](reference-cco-prototype.md) — user's Leaflet GUI reference; local copy ~/devel/cco-prototype, private data

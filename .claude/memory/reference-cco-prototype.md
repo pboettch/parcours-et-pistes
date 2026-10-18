@@ -30,4 +30,4 @@ What it contains:
   - for each object: where it was placed, plus material (tissu/carton/cuir/suspendu);
   - end of the trail, weather and encounters.
 
-The club data (places, names) is private: don't commit it to the public repo without asking. See [[project-gpx-trail-app]].
+The club data (places, names) is private: don't commit it to the public repo without asking. See [[project-overview]].
