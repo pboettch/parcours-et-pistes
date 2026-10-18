@@ -103,6 +103,9 @@ before the user decides.
 ephemeral key, optional password as second factor, app data = projects + name); app Settings →
 "Mes appareils"; CLI `pep link receive|send`.
 
+**Focus (user, 2026-10-18):** "forget the PoC for the moment, we only work on the low-level lib" —
+work on pep_channel/pep_content/pep_core, leave apps/pep_app alone unless asked.
+
 **Gotchas learned:** Flutter web in the Browser pane: debug (DDC) builds are slow/flaky → use the
 release `app.sh serve`; the pane caches `localhost` → open `127.0.0.1:8686/?v=N`; coordinate clicks
 get lost on the canvas → semantics are on (`ensureSemantics`), click via `find` refs; the pane
