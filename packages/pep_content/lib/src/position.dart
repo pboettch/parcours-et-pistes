@@ -1,24 +1,20 @@
 import 'dart:typed_data';
 
-import 'errors.dart';
+import 'geo.dart';
 import 'json.dart';
 
 /// A live position (`pos` collection, one item per member). How long it stays
 /// visible is decided by the channel (collection TTL), from the publish time.
-class Position {
+class Position extends GeoPoint {
   Position({
-    required this.lat,
-    required this.lon,
+    required double lat,
+    required double lon,
     required this.time,
     this.altitude,
     this.accuracy,
     this.heading,
     this.speed,
-  }) {
-    if (!(lat >= -90 && lat <= 90) || !(lon >= -180 && lon <= 180)) {
-      throw ContentFormatException('coordinates out of range: $lat, $lon');
-    }
-  }
+  }) : super(lat, lon);
 
   factory Position.fromJson(Json j) {
     j.checkVersion(version);
@@ -36,9 +32,6 @@ class Position {
   factory Position.decode(Uint8List b) => Position.fromJson(decodeJson(b));
 
   static const version = 1;
-
-  /// WGS84 degrees.
-  final double lat, lon;
 
   /// When the fix was taken (may be earlier than the publish time).
   final DateTime time;

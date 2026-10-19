@@ -72,6 +72,41 @@ void main() {
 
   extensionTests();
 
+  test('trail details, places and objects from plain waypoints', () {
+    final g = Gpx(
+      name: 'V1 : I - Butte brulé',
+      waypoints: [
+        GpxWaypoint(48.0, 2.0, name: '1', type: 'GENERIC'), // at the start
+        GpxWaypoint(48.001, 2.0, name: 'Point de passage 2', type: 'GENERIC'),
+        GpxWaypoint(48.002, 2.0005, name: '3'),
+        GpxWaypoint.place(48.0, 1.999, name: 'Parking', description: 'Minibus/Cyno'),
+        GpxWaypoint(48.003, 2.00001, name: 'Point de passage 8'), // at the end
+      ],
+      tracks: [
+        GpxTrack(
+          segments: [
+            [GpxPoint(48.0, 2.0), GpxPoint(48.0015, 2.0), GpxPoint(48.003, 2.0)],
+          ],
+        ),
+      ],
+    );
+    expect(TrailInfo.of(g), isNull);
+    final o = objectsFromWaypoints(g);
+    expect(o.objects.map((w) => w.name), ['Point de passage 2', '3']);
+    expect(o.places.single.name, 'Parking');
+    expect(o.waypoints, hasLength(5));
+    expect(o.waypoints.first.type, 'GENERIC');
+
+    var t = const TrailInfo(code: 'V1', level: 'I', setter: 'Christophe').applyTo(o);
+    t = const TrailInfo(code: 'V1', level: 'II').applyTo(t); // replaces
+    final back = Gpx.parse(t.toXml());
+    expect(back.metadataExtensions.pepAll('trail'), hasLength(1));
+    final info = TrailInfo.of(back)!;
+    expect((info.code, info.level, info.setter), ('V1', 'II', null));
+    expect(back.places.single.description, 'Minibus/Cyno');
+    expect(back.objects, hasLength(2));
+  });
+
   test('rejects invalid documents', () {
     for (final bad in [
       'not xml',

@@ -9,8 +9,14 @@ library;
 export 'package:xml/xml.dart';
 
 export 'src/errors.dart';
+export 'src/geo.dart';
 export 'src/gpx.dart';
 export 'src/json.dart' show Json, utf8Bytes;
 export 'src/member.dart';
 export 'src/position.dart';
+export 'src/progress.dart';
 export 'src/project_info.dart';
+export 'src/recorded_path.dart';
+export 'src/run.dart';
+export 'src/simulation.dart';
+export 'src/trail.dart';

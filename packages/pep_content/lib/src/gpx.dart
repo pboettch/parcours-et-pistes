@@ -1,6 +1,7 @@
 import 'package:xml/xml.dart';
 
 import 'errors.dart';
+import 'geo.dart';
 
 /// GPX 1.1 namespace.
 const gpxNamespace = 'http://www.topografix.com/GPX/1/1';
@@ -33,14 +34,9 @@ extension GpxExtensionAccess on List<XmlElement> {
 }
 
 /// A GPX point (track point, route point or waypoint).
-class GpxPoint {
-  GpxPoint(this.lat, this.lon, {this.ele, this.time, this.extensions = const []}) {
-    if (!(lat >= -90 && lat <= 90) || !(lon >= -180 && lon <= 180)) {
-      throw ContentFormatException('GPX coordinates out of range: $lat, $lon');
-    }
-  }
+class GpxPoint extends GeoPoint {
+  GpxPoint(super.lat, super.lon, {this.ele, this.time, this.extensions = const []});
 
-  final double lat, lon;
   final double? ele;
   final DateTime? time;
 
@@ -67,6 +63,10 @@ class GpxWaypoint extends GpxPoint {
   /// `<type>` value marking an RU object.
   static const objectType = 'pep:object';
 
+  /// `<type>` value marking a useful place (parking, meeting point…), named by
+  /// its `<name>`.
+  static const placeType = 'pep:place';
+
   factory GpxWaypoint.object(
     double lat,
     double lon, {
@@ -77,6 +77,9 @@ class GpxWaypoint extends GpxPoint {
   }) =>
       GpxWaypoint(lat, lon, name: name, description: description, type: objectType, time: time, extensions: extensions);
 
+  factory GpxWaypoint.place(double lat, double lon, {required String name, String? description}) =>
+      GpxWaypoint(lat, lon, name: name, description: description, type: placeType);
+
   final String? name;
   final String? comment;
   final String? description;
@@ -84,6 +87,21 @@ class GpxWaypoint extends GpxPoint {
   final String? symbol;
 
   bool get isObject => type == objectType;
+
+  bool get isPlace => type == placeType;
+
+  GpxWaypoint copyWith({String? name, String? description, String? type}) => GpxWaypoint(
+    lat,
+    lon,
+    ele: ele,
+    time: time,
+    extensions: extensions,
+    name: name ?? this.name,
+    comment: comment,
+    description: description ?? this.description,
+    type: type ?? this.type,
+    symbol: symbol,
+  );
 }
 
 class GpxTrack {
@@ -190,6 +208,9 @@ class Gpx {
 
   /// RU objects (waypoints of type [GpxWaypoint.objectType]).
   Iterable<GpxWaypoint> get objects => waypoints.where((w) => w.isObject);
+
+  /// Useful places (waypoints of type [GpxWaypoint.placeType]).
+  Iterable<GpxWaypoint> get places => waypoints.where((w) => w.isPlace);
 
   Gpx copyWith({
     String? name,
