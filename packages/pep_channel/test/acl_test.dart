@@ -7,23 +7,22 @@ import 'support/crypto.dart';
 
 void main() {
   late PepCrypto c;
-  late String owner, editor, other;
+  late String owner, writer, other;
   setUpAll(() async {
     c = await testCrypto();
     owner = Identity.generate(c).id;
-    editor = Identity.generate(c).id;
+    writer = Identity.generate(c).id;
     other = Identity.generate(c).id;
   });
 
-  ChannelAcl acl() => ChannelAcl.initial(
+  ChannelAcl acl() => ChannelAcl(
     ownerId: owner,
-    editors: {editor},
     collections: {
       'doc': const CollectionPolicy(Writers.owner),
-      'note': const CollectionPolicy(Writers.editors),
+      'note': const CollectionPolicy(Writers.assigned),
       'pos': const CollectionPolicy(Writers.self, ttl: Duration(minutes: 5)),
     },
-  );
+  ).withAssignee('note', 'x', writer);
 
   test('round trip', () {
     final a = ChannelAcl.decode(acl().encode());
@@ -32,19 +31,23 @@ void main() {
     expect(a.collections['pos']!.ttl, const Duration(minutes: 5));
     expect(a.collections['doc']!.ephemeral, isFalse);
     expect(a.collections['pos']!.withTtl(null).ephemeral, isFalse);
+    expect(a.assigneeOf('note', 'x'), writer);
+    expect(a.withAssignee('note', 'x', null).assignees, isEmpty);
   });
 
   test('permission matrix', () {
     final a = acl();
     final cases = {
       ('doc', owner, 'x'): true,
-      ('doc', editor, 'x'): false,
+      ('doc', writer, 'x'): false,
       ('doc', other, 'x'): false,
       ('note', owner, 'x'): true,
-      ('note', editor, 'x'): true,
+      ('note', writer, 'x'): true,
+      ('note', writer, 'y'): false,
+      ('note', owner, 'y'): true,
       ('note', other, 'x'): false,
       ('pos', other, other): true,
-      ('pos', other, editor): false,
+      ('pos', other, writer): false,
       ('pos', owner, other): false,
       ('undeclared', owner, 'x'): false,
     };
@@ -55,13 +58,22 @@ void main() {
     Map<String, dynamic> j() => jsonDecode(jsonEncode(acl().toJson())) as Map<String, dynamic>;
     final bad = <Map<String, dynamic>>[
       j()..['v'] = 2,
+      j()..['owner'] = 'short',
+      j()..['owner'] = 5,
+      j()..remove('owner'),
       j()
-        ..['owners'] = [
-          {'id': 'short'},
-        ],
-      j()..['owners'] = [],
-      j()..remove('owners'),
-      j()..['editors'] = ['short'],
+        ..['assign'] = {
+          'note': {'x': 'short'},
+        },
+      j()
+        ..['assign'] = {
+          'doc': {'x': owner},
+        },
+      j()
+        ..['assign'] = {
+          'note': {'bad/id': owner},
+        },
+      j()..['assign'] = {'note': 'x'},
       j()
         ..['collections'] = {
           'note': {'w': 'everyone'},

@@ -39,7 +39,7 @@ String checkCollection(String s) => isCollectionName(s) ? s : throw FormatPepExc
 ///
 /// ```text
 /// <base>/<uuid>/meta               owner-signed plaintext: KDF params, key check
-/// <base>/<uuid>/acl                owner-signed access list (editors, collections)
+/// <base>/<uuid>/acl                owner-signed access list (collections, assignments)
 /// <base>/<uuid>/<collection>/<id>  sealed items
 /// <base>/<uuid>/sync/<nonce>       empty non-retained barrier probes
 /// ```

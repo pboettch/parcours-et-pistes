@@ -61,6 +61,18 @@ class Identity {
   /// Human-comparable fingerprint of this identity (see [fingerprintOf]).
   String get fingerprint => fingerprintOf(id);
 
+  /// Whether [publicKey] is a usable Ed25519 public key (one [sealFor] can
+  /// encrypt to).
+  static bool isValidKey(PepCrypto c, Uint8List publicKey) {
+    if (publicKey.length != publicKeyBytes) return false;
+    try {
+      c.sodium.crypto.sign.pkToCurve25519(publicKey);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Encrypts [message] so that only [recipientId] can read it (libsodium
   /// sealed box to the X25519 form of the recipient's Ed25519 key).
   static Uint8List sealFor(PepCrypto c, String recipientId, Uint8List message) => c.sodium.crypto.box.seal(

@@ -5,7 +5,7 @@ library;
 import 'package:pep_channel/pep_channel.dart' show ChannelNotFoundException;
 
 export 'package:pep_channel/pep_channel.dart'
-    hide ChannelEvent, AclUpdated, ItemUpdated, ItemRemoved, PasswordChanged, ChannelDeleted, MessageRejected;
+    hide ChannelEvent, AclUpdated, ItemUpdated, ItemRemoved, ChannelDeleted, MessageRejected;
 export 'package:pep_content/pep_content.dart' hide utf8Bytes;
 
 export 'src/collections.dart';

@@ -8,7 +8,7 @@ sealed class SessionEvent {
   const SessionEvent();
 }
 
-/// Project information, editors or settings changed.
+/// Project information, track owners or settings changed.
 class ProjectUpdated extends SessionEvent {
   const ProjectUpdated(this.project);
 
@@ -54,18 +54,24 @@ class PositionRemoved extends SessionEvent {
   final String memberId;
 }
 
-/// The owner offered the project ownership to this member; take it over with
-/// `ProjectSession.acceptOwnership`.
-class OwnershipOffered extends SessionEvent {
-  const OwnershipOffered(this.fromOwnerId);
+class RunUpdated extends SessionEvent {
+  const RunUpdated(this.runId, this.run);
 
-  final String fromOwnerId;
+  final String runId;
+  final Run run;
 }
 
-/// The owner changed the project password. The session is locked until
-/// `ProjectSession.unlock` is called with the new password.
-class PasswordChanged extends SessionEvent {
-  const PasswordChanged();
+class RunRemoved extends SessionEvent {
+  const RunRemoved(this.runId);
+
+  final String runId;
+}
+
+/// The recorded path of member [memberId] changed (see `ProjectSession.path`).
+class PathUpdated extends SessionEvent {
+  const PathUpdated(this.memberId);
+
+  final String memberId;
 }
 
 /// The project was deleted by its owner.

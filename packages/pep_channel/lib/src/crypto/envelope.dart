@@ -144,6 +144,7 @@ class Envelope {
     final flags = h.u8();
     final rev = h.u32();
     final ms = h.u32() * 0x100000000 + h.u32();
+    if (ms > _maxMs) throw FormatPepException('publish time $ms out of range');
     final deleted = (flags & _flagDeleted) != 0;
     final body = (flags & _flagDeflated) != 0 ? inflate(payload) : Uint8List.fromList(payload);
     if (deleted && body.isNotEmpty) throw const FormatPepException('tombstone with a body');
@@ -158,6 +159,9 @@ class Envelope {
   }
 
   static const _headerBytes = 1 + 4 + 8;
+
+  /// DateTime's range.
+  static const _maxMs = 8640000000000000;
 
   static Uint8List _header(int flags, int rev, int ms) {
     if (ms < 0) throw ArgumentError.value(ms, 'time');

@@ -30,12 +30,6 @@ class ItemRemoved extends ChannelEvent {
   final bool expired;
 }
 
-/// The owner changed the password; the channel is locked until
-/// `SecureChannel.unlock` succeeds with the new one.
-class PasswordChanged extends ChannelEvent {
-  const PasswordChanged();
-}
-
 /// The owner deleted the channel (metadata or access list cleared).
 class ChannelDeleted extends ChannelEvent {
   const ChannelDeleted();

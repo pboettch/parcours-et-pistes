@@ -39,6 +39,24 @@ const gpxA = '''<?xml version="1.0" encoding="UTF-8"?>
 
 final gpxB = gpxA.replaceAll('45.2005', '45.2105');
 
+/// Metres per degree of latitude.
+const _mPerDeg = earthRadius * 3.141592653589793 / 180;
+
+/// A point [north] metres north of (45.2, 5.3).
+GeoPoint north(double m) => GeoPoint(45.2 + m / _mPerDeg, 5.3);
+
+/// A straight 600 m track heading north.
+final lineGpx = Gpx(
+  name: 'Ligne droite',
+  tracks: [
+    GpxTrack(
+      segments: [
+        [for (var m = 0.0; m <= 600; m += 50) GpxPoint(north(m).lat, north(m).lon)],
+      ],
+    ),
+  ],
+).toXml();
+
 /// [gpx] with a GPX metadata name (the track's display name).
 String named(String gpx, String name) =>
     gpx.replaceFirstMapped(RegExp(r'<gpx[^>]*>'), (m) => '${m[0]}<metadata><name>$name</name></metadata>');
@@ -62,7 +80,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
 
     tearDown(() async {
       for (final s in sessions) {
-        if (s.isOwner && !s.locked) {
+        if (s.isOwner) {
           try {
             await s.deleteProject();
           } on StateError {
@@ -82,22 +100,26 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       return s;
     }
 
-    Future<ProjectSession> create({String password = 'pw-1', Duration ttl = const Duration(minutes: 10)}) async =>
-        track(
-          await ProjectSession.create(
-            crypto: c,
-            transport: h.transport(),
-            identity: ownerId,
-            name: 'Forêt de Chambaran',
-            description: 'Entraînement du samedi',
-            discipline: Discipline.ru,
-            password: password,
-            positionTtl: ttl,
-            kdf: fastKdf(c),
-            clock: h.clock,
-            pruneInterval: const Duration(hours: 1),
-          ),
-        );
+    Future<ProjectSession> create({
+      String password = 'pw-1',
+      Duration ttl = const Duration(minutes: 10),
+      Transport? transport,
+    }) async => track(
+      await ProjectSession.create(
+        crypto: c,
+        transport: transport ?? h.transport(),
+        identity: ownerId,
+        name: 'Forêt de Chambaran',
+        description: 'Entraînement du samedi',
+        discipline: Discipline.ru,
+        password: password,
+        positionTtl: ttl,
+        kdf: fastKdf(c),
+        clock: h.clock,
+        pruneInterval: const Duration(hours: 1),
+        pathInterval: null,
+      ),
+    );
 
     Future<ProjectSession> join(
       ProjectSession owner,
@@ -105,25 +127,46 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       String password = 'pw-1',
       JoinLink? link,
       Duration timeout = const Duration(seconds: 5),
+      String? deviceId,
+      Transport? transport,
     }) async => track(
       await ProjectSession.join(
         crypto: c,
-        transport: h.transport(),
+        transport: transport ?? h.transport(),
         identity: who,
         link: link ?? JoinLink.parse(owner.joinLink.toUri()),
         password: password,
         timeout: timeout,
         clock: h.clock,
         pruneInterval: const Duration(hours: 1),
+        deviceId: deviceId,
+        pathInterval: null,
       ),
     );
 
     DateTime now() => (h.clock ?? DateTime.now)().toUtc();
 
+    /// Lets time pass (fake clock), so that successive steps get distinct times.
+    Future<void> tick([Duration d = const Duration(seconds: 10)]) async {
+      if (h.clock != null) {
+        h.advance(d);
+      } else {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    }
+
+    /// [s] walks through the given distances along [lineGpx].
+    Future<void> walk(ProjectSession s, Iterable<double> metres) async {
+      for (final m in metres) {
+        await s.publishPosition(Position(lat: north(m).lat, lon: north(m).lon, time: now(), accuracy: 5));
+        await tick();
+      }
+    }
+
     test('create and join: project, owner, link', () async {
       final o = await create();
       expect(o.isOwner, isTrue);
-      expect(o.canEditTracks, isTrue);
+      expect(o.canEditTrack('any'), isTrue);
       expect(o.project.name, 'Forêt de Chambaran');
       expect(o.project.description, 'Entraînement du samedi');
       expect(o.project.discipline, Discipline.ru);
@@ -132,7 +175,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       expect(o.channel.acl.collections.keys, unorderedEquals(PepCollections.defaults().keys));
       final a = await join(o, aliceId);
       expect(a.isOwner, isFalse);
-      expect(a.canEditTracks, isFalse);
+      expect(a.canEditTrack('any'), isFalse);
       expect(a.project.name, 'Forêt de Chambaran');
       expect(a.projectId, o.projectId);
     });
@@ -174,7 +217,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final o = await create();
       await expectLater(o.publishTrack(gpx: 'not gpx'), throwsA(isA<ContentFormatException>()));
       final a = await join(o, aliceId);
-      // An editor's app with a bug publishes a validly signed but broken track.
+      // An app with a bug publishes a validly signed but broken track.
       await o.channel.put(PepCollections.track, 'broken', utf8Bytes('<kml/>'));
       await eventually(() => events[a]!.whereType<MessageRejected>().isNotEmpty);
       expect(events[a]!.whereType<MessageRejected>().single.error, isA<ContentFormatException>());
@@ -182,21 +225,39 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       expect(o.tracks, isEmpty);
     });
 
-    test('permissions and delegation', () async {
+    test('track owners: one per track, assigned by the project owner', () async {
       final o = await create();
       final a = await join(o, aliceId);
       final b = await join(o, bobId);
       await expectLater(a.publishTrack(gpx: gpxA), throwsA(isA<AuthorizationException>()));
       await expectLater(a.updateProject(name: 'x'), throwsA(isA<AuthorizationException>()));
-      await expectLater(a.addEditor(aliceId.id), throwsA(isA<AuthorizationException>()));
-      await o.addEditor(aliceId.id);
-      await eventually(() => a.canEditTracks);
-      await eventually(() => events[a]!.whereType<ProjectUpdated>().any((e) => e.project.editors.contains(aliceId.id)));
-      final t = await a.publishTrack(gpx: named(gpxA, 'by alice'));
-      await eventually(() => b.tracks[t.id]?.signerId == aliceId.id);
-      await o.removeEditor(aliceId.id);
-      await eventually(() => !a.canEditTracks);
-      await expectLater(a.publishTrack(gpx: gpxB), throwsA(isA<AuthorizationException>()));
+      await expectLater(a.assignTrack('x', aliceId.id), throwsA(isA<AuthorizationException>()));
+      final t = await o.publishTrack(gpx: named(gpxA, 'by owner'));
+      final reserved = o.newTrackId();
+      await o.assignTrack(t.id, aliceId.id);
+      await o.assignTrack(reserved, aliceId.id); // before the track exists
+      await eventually(() => a.canEditTrack(t.id) && a.canEditTrack(reserved), reason: 'alice owns both');
+      await eventually(() => events[b]!.whereType<ProjectUpdated>().any((e) => e.project.trackOwners.length == 2));
+      expect(b.trackOwner(t.id), aliceId.id);
+      expect(o.canEditTrack(t.id), isFalse);
+      await expectLater(o.publishTrack(id: t.id, gpx: gpxB), throwsA(isA<AuthorizationException>()));
+      await a.publishTrack(id: t.id, gpx: named(gpxA, 'by alice'));
+      await a.publishTrack(id: reserved, gpx: named(gpxB, 'new by alice'));
+      await expectLater(a.publishTrack(gpx: gpxB), throwsA(isA<AuthorizationException>()), reason: 'new: owner');
+      await eventually(() => b.tracks[t.id]?.signerId == aliceId.id && b.tracks.containsKey(reserved));
+
+      // Reassigned to bob: alice can no longer change it; it stays valid for everyone.
+      await o.assignTrack(t.id, bobId.id);
+      await eventually(() => b.canEditTrack(t.id) && !a.canEditTrack(t.id));
+      await expectLater(a.publishTrack(id: t.id, gpx: gpxB), throwsA(isA<AuthorizationException>()));
+      final later = await join(o, Identity.generate(c));
+      expect(later.tracks[t.id]?.name, 'by alice');
+      expect(events[later]!.whereType<MessageRejected>(), isEmpty);
+      await b.deleteTrack(t.id);
+      await eventually(() => !o.tracks.containsKey(t.id));
+      await o.assignTrack(reserved, null); // back to the project owner
+      expect(o.canEditTrack(reserved), isTrue);
+      await o.publishTrack(id: reserved, gpx: named(gpxB, 'by owner again'));
     });
 
     test('members and positions', () async {
@@ -252,26 +313,6 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       await eventually(() => events[o]!.whereType<PositionRemoved>().isNotEmpty);
     });
 
-    test('password change: lock, unlock, content preserved', () async {
-      final o = await create();
-      final t = await o.publishTrack(gpx: named(gpxA, 'keep me'));
-      final a = await join(o, aliceId);
-      await a.setMemberName('Alice');
-      await eventually(() => o.members.containsKey(aliceId.id));
-      await o.changePassword('pw-2', kdf: fastKdf(c));
-      await eventually(() => a.locked);
-      expect(events[a]!.whereType<PasswordChanged>(), hasLength(1));
-      await expectLater(a.unlock('pw-1'), throwsA(isA<WrongPasswordException>()));
-      await a.unlock('pw-2');
-      await eventually(() => a.tracks[t.id]?.rev == 2);
-      expect(a.tracks[t.id]!.name, 'keep me');
-      expect(a.project.name, 'Forêt de Chambaran');
-      expect(a.members.containsKey(aliceId.id), isFalse, reason: 'members re-publish after unlocking');
-      await a.setMemberName('Alice');
-      await eventually(() => o.members[aliceId.id]?.name == 'Alice');
-      await expectLater(join(o, bobId, password: 'pw-1'), throwsA(isA<WrongPasswordException>()));
-    });
-
     test('wrong password and unknown project', () async {
       final o = await create();
       await expectLater(join(o, aliceId, password: 'nope'), throwsA(isA<WrongPasswordException>()));
@@ -304,7 +345,7 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       final a = await join(o, aliceId);
       // A newer app version adds a "photo" collection to the project.
       await o.channel.updateAcl(
-        collections: {...o.channel.acl.collections, 'photo': const CollectionPolicy(Writers.editors)},
+        collections: {...o.channel.acl.collections, 'photo': const CollectionPolicy(Writers.owner)},
       );
       await o.channel.put('photo', 'p1', utf8Bytes('jpeg…'));
       await eventually(() => a.channel.items('photo').containsKey('p1'), reason: 'channel carries it');
@@ -324,10 +365,80 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       await eventually(() => a.tracks.length == 2 && b.tracks.length == 1);
       expect(b.tracks.keys, [open.id]);
       expect(a.tracks[hidden.id]!.name, 'for alice');
+      // An update without visibleTo keeps the visibility.
+      await o.publishTrack(id: hidden.id, gpx: named(gpxA, 'still for alice'));
+      await eventually(() => a.tracks[hidden.id]?.name == 'still for alice');
+      expect(b.tracks.containsKey(hidden.id), isFalse);
       // Sharing it with bob later.
       await o.publishTrack(id: hidden.id, gpx: named(gpxA, 'for alice'), visibleTo: {aliceId.id, bobId.id});
       await eventually(() => b.tracks.containsKey(hidden.id));
       expect(events[b]!.whereType<TrackUpdated>().map((e) => e.track.id), contains(hidden.id));
+    });
+
+    test('device ids are checked before any channel exists', () async {
+      await expectLater(
+        ProjectSession.create(
+          crypto: c,
+          transport: h.transport(),
+          identity: ownerId,
+          name: 'x',
+          discipline: Discipline.ru,
+          password: 'pw',
+          kdf: fastKdf(c),
+          deviceId: 'not.valid',
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('a last full-track segment this version cannot read does not block the device', () async {
+      final o = await create();
+      final a = await join(o, aliceId, deviceId: 'phone');
+      await a.channel.put(
+        PepCollections.path,
+        a.channel.selfItemId(device: 'f0-phone'),
+        utf8Bytes('{"v":2,"p":"a newer format"}'),
+      );
+      sessions.remove(a);
+      await a.close();
+      final a2 = await join(o, aliceId, deviceId: 'phone');
+      a2.pathMode = PathMode.always;
+      await walk(a2, [0]);
+      expect(await a2.flushPath(), isTrue);
+      await eventually(() => o.path(aliceId.id).length == 1);
+      expect(o.channel.items(PepCollections.path), hasLength(2), reason: 'the unreadable segment is left as it is');
+    });
+
+    test('a deleteProject that fails (offline) keeps the session and its recorded points', () async {
+      final t = h.transport();
+      final o = await create(transport: t);
+      o.pathMode = PathMode.always;
+      await walk(o, [0]);
+      await t.disconnect();
+      await expectLater(
+        o.publishPosition(Position(lat: north(10).lat, lon: 5.3, time: now(), accuracy: 5)),
+        throwsA(isA<TransportException>()),
+      );
+      await expectLater(o.deleteProject(), throwsA(isA<TransportException>()));
+      expect(o.pathPending, isTrue, reason: 'the offline point is still waiting');
+      await t.connect();
+      expect(await o.flushPath(), isTrue);
+      expect(o.path(ownerId.id), hasLength(2));
+      sessions.remove(o);
+      await o.deleteProject();
+    });
+
+    test('deleteProject: only by the owner, and leaves the recorder of others alone', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      a.pathMode = PathMode.always;
+      await walk(a, [0]);
+      await expectLater(a.deleteProject(), throwsA(isA<AuthorizationException>()));
+      expect(a.pathPending, isFalse);
+      await walk(a, [10]);
+      await a.flushPath();
+      await eventually(() => o.path(aliceId.id).length == 2, reason: 'same full track, not a new one');
+      expect(o.channel.items(PepCollections.path), hasLength(1));
     });
 
     test('positions from several devices of one member', () async {
@@ -368,35 +479,246 @@ void sessionContract(String name, SessionHarness Function() harnessFactory) {
       await eventually(() => events[o]!.whereType<PositionRemoved>().single.memberId == aliceId.id);
     });
 
-    test('ownership transfer at project level', () async {
-      final o = await create();
-      final t = await o.publishTrack(gpx: named(gpxA, 'by first owner'));
-      final a = await join(o, aliceId);
-      await o.offerOwnership(aliceId.id);
-      await eventually(() => events[a]!.whereType<OwnershipOffered>().isNotEmpty);
-      expect(a.ownershipOfferedToMe, isTrue);
-      await a.acceptOwnership();
-      expect(a.isOwner, isTrue);
-      await eventually(() => o.project.ownerId == aliceId.id);
-      expect(o.isOwner, isFalse);
-      expect(o.canEditTracks, isTrue, reason: 'former owner becomes an editor');
-      expect(o.project.editors, contains(ownerId.id));
-      expect(a.project.name, 'Forêt de Chambaran');
-      await a.updateProject(name: 'Renamed by the new owner');
-      await eventually(() => o.project.name == 'Renamed by the new owner');
-      await expectLater(o.updateProject(name: 'x'), throwsA(isA<AuthorizationException>()));
-      final b = await join(a, bobId);
-      expect(b.tracks[t.id]!.signerId, ownerId.id);
-      expect(b.project.ownerId, aliceId.id);
-    });
-
     test('member events carry member ids, not topic pseudonyms', () async {
       final o = await create();
       final a = await join(o, aliceId);
       await a.setMemberName('Alice');
       await eventually(() => events[o]!.whereType<MemberUpdated>().any((e) => e.memberId == aliceId.id));
-      await o.changePassword('pw-2', kdf: fastKdf(c));
+      await a.channel.delete(PepCollections.member, a.channel.selfItemId());
       await eventually(() => events[o]!.whereType<MemberRemoved>().any((e) => e.memberId == aliceId.id));
+    });
+
+    test('runs: the designated source records the dog path; progress', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      final b = await join(o, bobId);
+      await a.setMemberName('Alice');
+      final t = await o.publishTrack(gpx: lineGpx);
+      final runId = await o.putRun(Run(track: t.id, dog: 'Rex', handler: 'Ana'));
+      await eventually(() => a.runs.containsKey(runId) && b.runs.containsKey(runId));
+      expect(a.runs[runId]!.status, RunStatus.planned);
+      expect(a.recordingPath, isFalse);
+      expect(o.runProgress(runId)!.started, isFalse);
+      expect(o.runProgress('nope'), isNull);
+      expect(o.dogPath('nope'), isEmpty);
+      await expectLater(a.putRun(Run(track: t.id, dog: 'Max')), throwsA(isA<AuthorizationException>()));
+      await expectLater(o.startRun('nope'), throwsArgumentError);
+
+      await o.setRunSource(runId, aliceId.id);
+      await o.startRun(runId);
+      await eventually(() => a.recordingPath && a.runs[runId]!.status == RunStatus.running);
+      await tick();
+      await walk(a, [for (var m = 0.0; m <= 200; m += 40) m]);
+      await eventually(() => o.path(aliceId.id).length == 6, reason: 'rolling points');
+      expect(o.channel.items(PepCollections.pathPoint), hasLength(6));
+      expect(o.channel.items(PepCollections.path), hasLength(1), reason: 'and the full track');
+      expect(events[o]!.whereType<PathUpdated>().map((e) => e.memberId), contains(aliceId.id));
+      await walk(b, [300]); // not the source: not recorded
+      expect(b.recordingPath, isFalse);
+
+      // The official follower changes: bob shares the dog's position from now on.
+      await o.setRunSource(runId, bobId.id);
+      await eventually(() => b.recordingPath && !a.recordingPath);
+      await tick();
+      await walk(b, [for (var m = 240.0; m <= 400; m += 40) m]);
+      await walk(a, [550]); // no longer the source
+      await eventually(() => o.dogPath(runId).length == 11, reason: 'both sources, each over its period');
+      expect(o.path(aliceId.id), hasLength(6));
+      final p = o.runProgress(runId)!;
+      expect(p.started, isTrue);
+      expect(p.progress, closeTo(400, 2));
+      expect(p.fraction, closeTo(400 / 600, 0.01));
+
+      await o.finishRun(runId);
+      await eventually(() => !b.recordingPath);
+      expect(o.runs[runId]!.sources.map((s) => s.memberId), [aliceId.id, bobId.id]);
+      expect(events[a]!.whereType<RunUpdated>(), isNotEmpty);
+
+      // Someone joining later sees the same path.
+      final late = await join(o, aliceId, deviceId: 'tablet');
+      expect(late.dogPath(runId), hasLength(11));
+      expect(late.runProgress(runId)!.progress, closeTo(400, 2));
+
+      await o.deleteRun(runId);
+      await eventually(() => events[a]!.whereType<RunRemoved>().isNotEmpty && a.runs.isEmpty);
+    });
+
+    test('recorder: 20 rolling points, the full track has them all, a restart continues it', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      a.pathMode = PathMode.always;
+      await walk(a, [for (var i = 0; i < 25; i++) i * 10.0]);
+      expect(await a.flushPath(), isTrue);
+      await eventually(() => o.path(aliceId.id).length == 25);
+      expect(o.channel.items(PepCollections.pathPoint), hasLength(PepCollections.rollingPoints));
+      List<TimedPoint> full(ProjectSession s) =>
+          RecordedPath.decode(s.channel.items(PepCollections.path).values.single.body).points;
+      expect(full(o), hasLength(25));
+
+      // The app restarts on the same device: same full track, next rolling item.
+      sessions.remove(a);
+      await a.close();
+      final a2 = await join(o, aliceId);
+      a2.pathMode = PathMode.always;
+      await walk(a2, [250]);
+      await a2.flushPath();
+      await eventually(() => full(o).length == 26);
+      expect(o.path(aliceId.id), hasLength(26));
+      final rolling = o.channel.items(PepCollections.pathPoint).values.map((i) => Position.decode(i.body).time).toList()
+        ..sort();
+      expect(rolling, hasLength(20));
+      expect(rolling.last, o.path(aliceId.id).last.time, reason: 'the oldest rolling point was replaced');
+    });
+
+    test('the full track is split into segments of 1000 points', () async {
+      if (h.clock == null) return markTestSkipped('fast on the memory broker only');
+      final o = await create();
+      final a = await join(o, aliceId);
+      a.pathMode = PathMode.always;
+      final t0 = now();
+      for (var i = 0; i < PepCollections.pathSegmentPoints + 5; i++) {
+        await a.publishPosition(Position(lat: 45.2, lon: 5.3, time: t0.add(Duration(seconds: i)), accuracy: 5));
+      }
+      expect(await a.flushPath(), isTrue);
+      await eventually(() => o.channel.items(PepCollections.path).length == 2);
+      final sizes = [
+        for (final i in o.channel.items(PepCollections.path).values) RecordedPath.decode(i.body).points.length,
+      ]..sort();
+      expect(sizes, [5, PepCollections.pathSegmentPoints]);
+      expect(o.path(aliceId.id), hasLength(PepCollections.pathSegmentPoints + 5));
+      // A restart continues the open segment.
+      sessions.remove(a);
+      await a.close();
+      final a2 = await join(o, aliceId);
+      a2.pathMode = PathMode.always;
+      await a2.publishPosition(Position(lat: 45.2, lon: 5.3, time: now().add(const Duration(hours: 1)), accuracy: 5));
+      await a2.flushPath();
+      await eventually(() => o.path(aliceId.id).length == PepCollections.pathSegmentPoints + 6);
+      expect(o.channel.items(PepCollections.path), hasLength(2));
+    });
+
+    test('close waits for a full-track publication already running', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      a.pathMode = PathMode.always;
+      await walk(a, [0]); // first point: published at once
+      await a.publishPosition(Position(lat: north(10).lat, lon: 5.3, time: now(), accuracy: 5));
+      final running = a.flushPath();
+      await a.publishPosition(
+        Position(lat: north(20).lat, lon: 5.3, time: now().add(const Duration(seconds: 1)), accuracy: 5),
+      );
+      sessions.remove(a);
+      await a.close();
+      await running;
+      await eventually(() => o.path(aliceId.id).length == 3);
+      final full = o.channel.items(PepCollections.path).values.single;
+      expect(RecordedPath.decode(full.body).points, hasLength(3));
+    });
+
+    test('recorded points with an impossible time are rejected, not fatal', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      await a.channel.put(
+        PepCollections.pathPoint,
+        a.channel.selfItemId(device: 'r0'),
+        utf8Bytes('{"v":1,"lat":45.2,"lon":5.3,"ts":99999999999999999}'),
+      );
+      await eventually(() => events[o]!.whereType<MessageRejected>().isNotEmpty);
+      expect(o.path(aliceId.id), isEmpty);
+    });
+
+    test('overlapping positions while recording', () async {
+      final o = await create();
+      final a = await join(o, aliceId);
+      a.pathMode = PathMode.always;
+      final t0 = now();
+      await Future.wait([
+        for (var i = 0; i < 4; i++)
+          a.publishPosition(
+            Position(
+              lat: north(i * 10).lat,
+              lon: 5.3,
+              time: t0.add(Duration(seconds: i)),
+              accuracy: 5,
+            ),
+          ),
+      ]);
+      await a.flushPath();
+      await eventually(() => o.path(aliceId.id).length == 4);
+      expect(o.channel.items(PepCollections.pathPoint), hasLength(4));
+    });
+
+    test('two owner devices changing a run at once: everyone ends with the same run', () async {
+      final o = await create();
+      final o2 = await join(o, ownerId, deviceId: 'tablet');
+      final a = await join(o, aliceId);
+      final t = await o.publishTrack(gpx: lineGpx);
+      final runId = await o.putRun(Run(track: t.id, dog: 'Rex'));
+      await eventually(() => o2.runs.containsKey(runId) && a.runs.containsKey(runId));
+      await Future.wait([o.setRunSource(runId, aliceId.id), o2.startRun(runId)]);
+      String view(ProjectSession s) => jsonEncode(s.runs[runId]?.toJson());
+      await eventually(() => view(o) == view(o2) && view(o) == view(a), reason: 'one version wins everywhere');
+      final late = await join(o, bobId);
+      expect(view(late), view(o));
+    });
+
+    test('path modes, offline queue', () async {
+      final o = await create();
+      final t = h.transport();
+      final a = await join(o, aliceId, transport: t);
+      await walk(a, [0]);
+      expect(a.recordingPath, isFalse);
+      a.pathMode = PathMode.always;
+      expect(a.recordingPath, isTrue);
+      await walk(a, [10]);
+      await eventually(() => o.path(aliceId.id).length == 1);
+
+      // No connection: positions fail, recorded points wait and keep their time.
+      await t.disconnect();
+      for (final m in [20.0, 30.0]) {
+        await expectLater(
+          a.publishPosition(Position(lat: north(m).lat, lon: north(m).lon, time: now(), accuracy: 5)),
+          throwsA(isA<TransportException>()),
+        );
+        await tick();
+      }
+      expect(a.pathPending, isTrue);
+      await t.connect();
+      await walk(a, [40]);
+      expect(await a.flushPath(), isTrue);
+      expect(a.pathPending, isFalse);
+      await eventually(() => o.path(aliceId.id).length == 4, reason: 'kept in the full track');
+      final times = o.path(aliceId.id).map((p) => p.time).toList();
+      expect(times, orderedEquals([...times]..sort()));
+
+      await a.publishPosition(Position(lat: 45.3, lon: 5.3, time: now(), accuracy: 500)); // too inaccurate
+      a.pathMode = PathMode.never;
+      await walk(a, [50]);
+      await settle();
+      expect(o.path(aliceId.id), hasLength(4));
+    });
+
+    test('the owner adds collections missing from older projects', () async {
+      final o = await create();
+      final old = {...o.channel.acl.collections}
+        ..remove(PepCollections.run)
+        ..remove(PepCollections.path)
+        ..remove(PepCollections.pathPoint);
+      await o.channel.updateAcl(collections: old);
+      final a = await join(o, aliceId);
+      expect(a.channel.acl.collections.containsKey(PepCollections.run), isFalse);
+      await expectLater(a.ensureCollections(), throwsA(isA<AuthorizationException>()));
+      await join(o, ownerId, deviceId: 'laptop');
+      await eventually(() => a.channel.acl.collections.containsKey(PepCollections.run));
+      expect(a.channel.acl.collections[PepCollections.pathPoint]!.writers, Writers.self);
+      expect(a.channel.acl.collections[PepCollections.path]!.writers, Writers.self);
+    });
+
+    test('bot members', () async {
+      final o = await create();
+      final bot = await join(o, bobId);
+      await bot.setMemberName('Tractive', bot: true);
+      await eventually(() => o.members[bobId.id]?.bot ?? false);
     });
 
     test('nothing readable on the broker', () async {
