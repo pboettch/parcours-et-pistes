@@ -13,9 +13,8 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # Dart SDK used by CI (the libraries require >= 3.9; developed with 3.13).
-  DART_SDK: stable
+# The workspace will contain the Flutter apps, so every job uses the Flutter SDK
+# (stable channel), which bundles Dart (the libraries require Dart >= 3.9).
 
 jobs:
   analyze:
@@ -23,18 +22,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
         with:
-          sdk: ${{ env.DART_SDK }}
-      - name: Cache pub packages
-        uses: actions/cache@v6
-        with:
-          path: ~/.pub-cache
-          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
-      - run: dart pub get
+          channel: stable
+          cache: true
+          pub-cache: true
+      - run: flutter pub get
       - name: Check formatting
-        run: dart format --output=none --set-exit-if-changed packages
-      - name: Analyze
+        run: dart format --output=none --set-exit-if-changed packages .claude/scripts
+      - name: Analyze packages
         run: dart analyze --fatal-infos packages
 
   test:
@@ -46,15 +42,12 @@ jobs:
         package: [pep_content, pep_channel, pep_core]
     steps:
       - uses: actions/checkout@v7
-      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
         with:
-          sdk: ${{ env.DART_SDK }}
-      - name: Cache pub packages
-        uses: actions/cache@v6
-        with:
-          path: ~/.pub-cache
-          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
-      - run: dart pub get
+          channel: stable
+          cache: true
+          pub-cache: true
+      - run: flutter pub get
 
       - name: Start MQTT test broker
         if: matrix.package != 'pep_content'
