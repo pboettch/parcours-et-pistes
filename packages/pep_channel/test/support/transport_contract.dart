@@ -74,6 +74,36 @@ void transportContract(String name, TransportHarness Function() harness, {String
       open.clear();
     });
 
+    test('concurrent connects share one connection; disconnect while connecting', () async {
+      final t = h.create();
+      open.add(t);
+      await Future.wait([t.connect(), t.connect()]);
+      expect(t.state, TransportState.connected);
+      await t.subscribe('$base/#');
+      await t.disconnect();
+      final first = t.connect().then((_) {}, onError: (Object _) {}); // may be aborted
+      await t.disconnect();
+      await first;
+      await t.connect();
+      await h.advance(const Duration(seconds: 1));
+      expect(t.state, TransportState.connected);
+      final inbox = Inbox(t);
+      await t.subscribe('$base/#');
+      await t.publish('$base/y', bytes('still here'));
+      await inbox.waitFor((m) => m.any((x) => x.topic == '$base/y'));
+      await inbox.close();
+    });
+
+    test('subscribing again to the same filter completes', () async {
+      final t = await connected();
+      await t.subscribe('$base/#');
+      await t.subscribe('$base/#').timeout(const Duration(seconds: 3));
+      final inbox = Inbox(t);
+      await t.publish('$base/x', bytes('hello'));
+      await inbox.waitFor((m) => m.any((x) => x.topic == '$base/x'));
+      await inbox.close();
+    });
+
     test('connect / disconnect states', () async {
       final t = h.create();
       open.add(t);

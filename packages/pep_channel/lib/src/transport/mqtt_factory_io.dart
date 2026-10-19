@@ -12,7 +12,12 @@ MqttClient createMqttClient(Uri url, String clientId, {Set<String> pinnedCertifi
   switch (url.scheme) {
     case 'mqtt':
     case 'mqtts':
-      c = MqttServerClient.withPort(url.host, clientId, url.hasPort ? url.port : (url.scheme == 'mqtts' ? 8883 : 1883));
+      c = MqttServerClient.withPort(
+        url.host,
+        clientId,
+        url.hasPort ? url.port : (url.scheme == 'mqtts' ? 8883 : 1883),
+        maxConnectionAttempts: 1, // the transport retries itself
+      );
       c.secure = url.scheme == 'mqtts';
     case 'ws':
     case 'wss':
@@ -20,6 +25,7 @@ MqttClient createMqttClient(Uri url, String clientId, {Set<String> pinnedCertifi
         '${url.scheme}://${url.host}${url.path}',
         clientId,
         url.hasPort ? url.port : (url.scheme == 'wss' ? 443 : 80),
+        maxConnectionAttempts: 1,
       );
       c.useWebSocket = true;
     default:
