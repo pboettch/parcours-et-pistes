@@ -25,7 +25,11 @@ class KdfParams {
 
   factory KdfParams.fromJson(Map<String, dynamic> j) {
     if (j['alg'] != alg) throw FormatPepException('unsupported kdf ${j['alg']}');
-    return KdfParams(opsLimit: _int(j['ops']), memLimit: _int(j['mem']), salt: unb64u(j['salt'] as String? ?? ''));
+    return KdfParams(
+      opsLimit: _int(j['ops']),
+      memLimit: _int(j['mem']),
+      salt: unb64u(j['salt'] is String ? j['salt'] as String : ''),
+    );
   }
 
   static const alg = 'argon2id13';

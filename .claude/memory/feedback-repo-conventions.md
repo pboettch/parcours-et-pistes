@@ -14,4 +14,4 @@ Everything is handled with git, and we **commit often**.
 
 **How to apply:** write new memories into `.claude/memory/` (via the symlinked path is fine), put helper
 scripts in `.claude/scripts/`, and make a git commit after every logical step (setup, each phase,
-each green test milestone) — include memory changes in commits. Related: [[project-gpx-trail-app]].
+each green test milestone) — include memory changes in commits. Related: [[project-overview]].

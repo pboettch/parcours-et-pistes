@@ -23,7 +23,8 @@ class Track {
   /// Publish time of this revision.
   final DateTime updated;
 
-  /// Member (owner or editor) who published this revision.
+  /// Who signed this revision: the track owner, or the project owner
+  /// re-signing it (reassignment).
   final String signerId;
 
   /// Members allowed to see this track (always including the owner and the

@@ -19,7 +19,7 @@ import 'meta.dart';
 
 /// Latest accepted revision of an item topic.
 class _Entry {
-  _Entry(this.opened, this.item);
+  _Entry(this.opened, this.item, [this.recipients]);
 
   /// The verified envelope content (raw body; restricted blocks still sealed).
   final Opened opened;
@@ -28,13 +28,39 @@ class _Entry {
   /// and restricted items this member may not read.
   final ChannelItem? item;
 
+  /// Recipients of a restricted item (also when this member is not one).
+  final Set<String>? recipients;
+
   int get rev => opened.rev;
   DateTime get time => opened.time;
 
-  bool olderThan(Opened o) => o.rev > rev || (o.rev == rev && o.time.isAfter(time));
+  bool olderThan(Opened o) => _newer(o, opened);
 }
 
-final _deviceRe = RegExp(r'^[A-Za-z0-9_-]{1,32}$');
+/// Whether version [a] of an item replaces the known version [b]: a higher
+/// revision, or the same one published later. Two writers publishing the same
+/// revision at the same millisecond: the one received last wins, like the
+/// retained message at the broker (which delivers a topic's messages in one
+/// order to everyone), so that every client ends up with the broker's version.
+/// The same signed content re-encrypted (new nonce) is the same version.
+bool _newer(Opened a, Opened b) {
+  if (a.rev != b.rev) return a.rev > b.rev;
+  if (a.time != b.time) return a.time.isAfter(b.time);
+  return !(a.signerId == b.signerId &&
+      a.deleted == b.deleted &&
+      a.restricted == b.restricted &&
+      bytesEqual(a.body, b.body));
+}
+
+/// Highest revision accepted for items written by members (the owner may go
+/// beyond, when re-signing).
+const maxItemRev = Envelope.maxRev - 1048576;
+
+/// Device names given by apps ([SecureChannel.selfItemId]).
+final _deviceRe = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+
+/// Device suffixes in self item ids (keyed hashes of device names).
+final _suffixRe = RegExp(r'^[A-Za-z0-9_-]{1,32}$');
 
 /// An end-to-end encrypted, signed and access-controlled channel over a
 /// [Transport]: collections of opaque items, kept in sync with the broker.
@@ -55,7 +81,7 @@ class SecureChannel {
     required Transport transport,
     required Identity identity,
     required this.topics,
-    required String anchorId,
+    required this.ownerId,
     required this.linkBroker,
     required DateTime Function()? clock,
     required Duration pruneInterval,
@@ -63,10 +89,9 @@ class SecureChannel {
        _env = Envelope(crypto),
        _transport = transport,
        _me = identity,
-       _anchorId = anchorId,
        _clock = clock ?? DateTime.now,
        _pruneInterval = pruneInterval {
-    publicKeyFromId(anchorId);
+    publicKeyFromId(ownerId);
   }
 
   /// Creates a new channel owned by [identity] with the given [collections].
@@ -76,7 +101,6 @@ class SecureChannel {
     required Identity identity,
     required String password,
     required Map<String, CollectionPolicy> collections,
-    Set<String> editors = const {},
     String topicBase = ChannelTopics.defaultBase,
     String? linkBroker,
     KdfParams? kdf,
@@ -89,16 +113,21 @@ class SecureChannel {
       transport: transport,
       identity: identity,
       topics: ChannelTopics(newUuid(crypto), base: topicBase),
-      anchorId: identity.id,
+      ownerId: identity.id,
       linkBroker: linkBroker,
       clock: clock,
       pruneInterval: pruneInterval,
     );
     final params = kdf ?? KdfParams.generate(crypto);
     s._key = ProjectKey.derive(crypto, password, params);
-    await s._publishAcl(ChannelAcl.initial(ownerId: identity.id, editors: editors, collections: collections));
-    await s._publishMeta(ChannelMeta(kdf: params, keyCheck: s._key!.check, rev: 1));
-    await s._start();
+    try {
+      await s._publishAcl(ChannelAcl(ownerId: identity.id, collections: collections));
+      await s._publishMeta(ChannelMeta(kdf: params, keyCheck: s._key!.check));
+      await s._start();
+    } catch (_) {
+      await s._shutdown(clearEphemeral: false);
+      rethrow;
+    }
     return s;
   }
 
@@ -107,8 +136,7 @@ class SecureChannel {
   /// Returns once all retained items have been received (sync barrier).
   /// Throws [WrongPasswordException] for a wrong password and
   /// [ChannelNotFoundException] when no metadata and access list signed by
-  /// the owner (the link's owner or a successor in the ownership chain)
-  /// arrive within [timeout].
+  /// the owner named in the link arrive within [timeout].
   static Future<SecureChannel> join({
     required PepCrypto crypto,
     required Transport transport,
@@ -125,7 +153,7 @@ class SecureChannel {
       transport: transport,
       identity: identity,
       topics: ChannelTopics(link.channelId, base: link.topicBase),
-      anchorId: link.ownerId,
+      ownerId: link.ownerId,
       linkBroker: link.broker,
       clock: clock,
       pruneInterval: pruneInterval,
@@ -137,14 +165,13 @@ class SecureChannel {
         timeout,
         onTimeout: () => throw const ChannelNotFoundException('no channel metadata on the broker'),
       );
-      await s.unlock(password);
+      s._deriveKey(password);
       if (s._acl == null) {
         await s._aclArrived.future.timeout(
           timeout,
           onTimeout: () => throw const ChannelNotFoundException('no valid access list on the broker'),
         );
       }
-      if (!s._metaVerified) throw const ChannelNotFoundException('channel metadata not signed by the owner');
       return s;
     } catch (_) {
       await s.close(clearEphemeral: false);
@@ -159,26 +186,24 @@ class SecureChannel {
   final DateTime Function() _clock;
   final Duration _pruneInterval;
 
-  /// Trusted owner key from the join link (or the creator): the ownership
-  /// chain is verified from this key onwards.
-  final String _anchorId;
-
   final ChannelTopics topics;
 
   /// Broker URL embedded in generated join links (null = app default broker).
   final String? linkBroker;
 
+  /// The channel's owner (its creator, named in the join link); never changes.
+  final String ownerId;
+
   ProjectKey? _key;
   ChannelMeta? _meta;
-  var _metaVerified = false;
-  Uint8List? _metaAcceptedRaw;
   ChannelAcl? _acl;
-  (int, DateTime)? _aclVersion;
+  Opened? _aclVersion;
 
   /// Accepted items and tombstones by topic.
   final _entries = <String, _Entry>{};
 
-  /// Latest raw payload per topic (dedup, re-processing after unlock / ACL change).
+  /// Latest raw payload per topic (dedup, processing once the key is derived,
+  /// re-processing after an ACL change).
   final _raw = <String, Uint8List>{};
 
   /// Item topics not accepted under the current ACL (unknown collection or
@@ -194,8 +219,44 @@ class SecureChannel {
   final _aclArrived = Completer<void>();
   final _events = StreamController<ChannelEvent>.broadcast();
   StreamSubscription<TransportMessage>? _sub;
+  StreamSubscription<TransportState>? _stateSub;
+
+  /// Last transport state seen (reconnects are noticed by events and before
+  /// each write).
+  var _connected = false;
+
+  /// The retained state may be outdated (a reconnect, or a failed reload).
+  var _stale = false;
+
+  /// Reloads started (the latest one counts).
+  var _reloads = 0;
+
+  /// The new connection may have lost the subscription.
+  var _subscribeAgain = false;
+
+  /// The reload in progress: completes with the error, if any.
+  Future<Object?>? _reload;
+
+  /// The tail of this session's writes, which run one at a time, in call
+  /// order.
+  Future<void> _writes = Future.value();
+
+  /// Queues [write]; refused once [close] or [deleteChannel] was called.
+  Future<T> _serial<T>(Future<T> Function() write) {
+    if (_closing || _closed) return Future.error(StateError('channel closed'));
+    final result = _writes.then((_) async {
+      await _ready();
+      return write();
+    });
+    _writes = result.then((_) {}, onError: (Object _) {});
+    return result;
+  }
+
   Timer? _pruneTimer;
   var _closed = false;
+
+  /// [close] or [deleteChannel] started: no new writes.
+  var _closing = false;
 
   // ---------------------------------------------------------------- state
 
@@ -204,45 +265,43 @@ class SecureChannel {
   /// This device's member id.
   String get memberId => _me.id;
 
-  /// Current owner (last entry of the verified ownership chain).
-  String get ownerId => _acl?.ownerId ?? _anchorId;
-
   bool get isOwner => _me.id == ownerId;
-
-  /// True after the owner changed the password, until [unlock] succeeds.
-  bool get locked => _key == null;
 
   Stream<ChannelEvent> get events => _events.stream;
 
   ChannelAcl get acl => _acl ?? (throw StateError('access list not loaded'));
 
   /// Revision of the current access list.
-  int get aclRev => _aclVersion?.$1 ?? 0;
+  int get aclRev => _aclVersion?.rev ?? 0;
 
-  /// Join link for this channel, pinning the current owner.
+  /// Join link for this channel, pinning its owner.
   JoinLink get joinLink => JoinLink(channelId: channelId, ownerId: ownerId, broker: linkBroker, topicBase: topics.base);
-
-  /// Whether the current owner offered the ownership to this member.
-  bool get ownershipOfferedToMe => !locked && _acl?.offer?.memberId == _me.id && acl.offerValid(_c, channelId);
 
   /// A new random item id (16 chars, topic-safe).
   String generateItemId() => newItemId(_c);
 
   /// Topic id of this member's item in `self` collections, optionally per
-  /// [device] (e.g. positions of several devices of one user).
+  /// [device] (`[A-Za-z0-9_-]{1,64}`, e.g. positions of several devices of one
+  /// user, or several items of one device).
   String selfItemId({String? device}) => selfItemIdOf(_me.id, device: device);
 
-  /// Topic id of [memberId]'s item in `self` collections. It is a pseudonym
-  /// derived from the channel key: member ids never appear in topics.
+  /// Topic id of [memberId]'s item in `self` collections: a pseudonym derived
+  /// from the channel key, plus for a [device] a keyed hash of its name —
+  /// neither member ids nor device names appear in topics.
   String selfItemIdOf(String memberId, {String? device}) {
     final p = _pseudonym(memberId);
     if (device == null) return p;
     if (!_deviceRe.hasMatch(device)) throw FormatPepException('invalid device id "$device"');
-    return '$p.$device';
+    final tag = _c.sodium.crypto.genericHash(
+      message: Uint8List.fromList([...utf8Bytes('pep-device-v1'), ...publicKeyFromId(memberId), ...utf8Bytes(device)]),
+      key: _requireKey().pseudonymKey,
+      outLen: 16,
+    );
+    return '$p.${b64u(tag.sublist(0, 9))}';
   }
 
   /// Whether this member may currently publish item [id] of [collection].
-  bool canWrite(String collection, String id) => !locked && _acl != null && _canWrite(_me.id, collection, id);
+  bool canWrite(String collection, String id) => _key != null && _acl != null && _canWrite(_me.id, collection, id);
 
   /// Live items of [collection] readable by this member, by id (expired
   /// ephemeral items filtered out).
@@ -253,6 +312,10 @@ class SecureChannel {
         if (e.item case final i? when i.collection == collection && _fresh(i, now)) i.id: i,
     });
   }
+
+  /// Recipients of item [id] if it is restricted, also when this member
+  /// cannot read it; null for unrestricted or unknown items.
+  Set<String>? recipientsOf(String collection, String id) => _entries[topics.item(collection, id)]?.recipients;
 
   ChannelItem? item(String collection, String id) {
     final i = _entries[topics.item(collection, id)]?.item;
@@ -266,147 +329,114 @@ class SecureChannel {
   /// With [recipients], the body is encrypted with a fresh key that is sealed
   /// individually for each recipient (plus the owner and this member, always
   /// added): other members see that the item exists, but cannot read it.
-  Future<ChannelItem> put(String collection, String id, Uint8List body, {Set<String>? recipients}) async {
+  Future<ChannelItem> put(String collection, String id, Uint8List body, {Set<String>? recipients}) =>
+      _serial(() => _put(collection, id, body, recipients: recipients));
+
+  Future<ChannelItem> _put(String collection, String id, Uint8List body, {Set<String>? recipients}) async {
     final policy = _requireWrite(collection, id);
     final topic = topics.item(collection, id);
-    recipients?.forEach(publicKeyFromId);
+    for (final r in recipients ?? const <String>{}) {
+      if (!Identity.isValidKey(_c, publicKeyFromId(r))) throw FormatPepException('invalid member id "$r"');
+    }
+    final rev = _checkRev(topic);
     final data = recipients == null
-        ? _seal(topic, body, rev: _nextRev(topic))
-        : _seal(
-            topic,
-            _restrict(topic, body, {...recipients, ownerId, _me.id}),
-            rev: _nextRev(topic),
-            restricted: true,
-          );
+        ? _seal(topic, body, rev: rev)
+        : _seal(topic, _restrict(topic, body, {...recipients, ownerId, _me.id}), rev: rev, restricted: true);
     await _publish(topic, data, expiry: policy.ttl);
     if (policy.ephemeral) _ownEphemeral.add(topic);
-    return _entries[topic]!.item!;
+    if (_closed) throw StateError('channel closed');
+    final e = _entries[topic];
+    if (e?.item == null || e!.rev != rev || e.opened.signerId != _me.id) {
+      throw StateError('$collection/$id: the published revision was not accepted');
+    }
+    return e.item!;
   }
 
   /// Deletes item [id]: a signed tombstone for persistent collections, a
   /// cleared retained message for ephemeral ones.
-  Future<void> delete(String collection, String id) async {
+  Future<void> delete(String collection, String id) => _serial(() => _delete(collection, id));
+
+  Future<void> _delete(String collection, String id) async {
     final policy = _requireWrite(collection, id);
     final topic = topics.item(collection, id);
     if (policy.ephemeral) {
       await _publish(topic, Uint8List(0));
       _ownEphemeral.remove(topic);
     } else {
-      await _publish(topic, _seal(topic, Uint8List(0), rev: _nextRev(topic), deleted: true));
+      await _publish(topic, _seal(topic, Uint8List(0), rev: _checkRev(topic), deleted: true));
     }
   }
 
-  /// Owner only: replaces editors and/or collections of the access list.
-  Future<void> updateAcl({Set<String>? editors, Map<String, CollectionPolicy>? collections}) async {
+  /// Owner only: replaces the collections of the access list, then re-signs
+  /// the items whose writer may no longer write them (see [assign]).
+  Future<void> updateAcl({Map<String, CollectionPolicy>? collections}) =>
+      _serial(() => _updateAcl(collections: collections));
+
+  Future<void> _updateAcl({Map<String, CollectionPolicy>? collections}) async {
     _requireOwner();
-    await _publishAcl(acl.copyWith(editors: editors, collections: collections));
+    await _publishAcl(acl.copyWith(collections: collections));
+    await _resealOrphans();
   }
 
-  Future<void> addEditor(String memberId) {
-    publicKeyFromId(memberId);
-    return updateAcl(editors: {...acl.editors, memberId});
-  }
+  /// Owner only: makes [memberId] the writer of item [id] of an `assigned`
+  /// collection (null: the owner again). The current revision is re-signed by
+  /// the owner, so that it stays valid for everyone; a restricted item gets
+  /// the new writer as a recipient.
+  Future<void> assign(String collection, String id, String? memberId) =>
+      _serial(() => _assign(collection, id, memberId));
 
-  Future<void> removeEditor(String memberId) => updateAcl(editors: {...acl.editors}..remove(memberId));
-
-  /// Owner only: offers the ownership to [memberId], who takes over with
-  /// [acceptOwnership]. The offer can be withdrawn with [cancelOwnershipOffer].
-  Future<void> offerOwnership(String memberId) async {
+  Future<void> _assign(String collection, String id, String? memberId) async {
     _requireOwner();
-    publicKeyFromId(memberId);
-    if (memberId == _me.id) throw ArgumentError('cannot offer the ownership to yourself');
-    final sig = _me.sign(OwnerLink.toSign(channelId, acl.owners.length, memberId));
-    await _publishAcl(acl.copyWith(offer: OwnerLink(memberId, sig)));
+    if (acl.collections[collection]?.writers != Writers.assigned) {
+      throw AuthorizationException('"$collection" is not an assigned collection');
+    }
+    checkTopicId(id);
+    if (memberId != null) publicKeyFromId(memberId);
+    if (acl.assigneeOf(collection, id) == memberId) return;
+    // The current revision first, signed by the owner (valid under both access
+    // lists): the new writer's first edit then follows it.
+    final topic = topics.item(collection, id);
+    final e = _entries[topic];
+    if (e != null) {
+      final r = e.item?.recipients;
+      if (e.opened.restricted && memberId != null && (r == null || !r.contains(memberId))) {
+        if (e.item == null) {
+          throw AuthorizationException('$collection/$id is restricted and not readable by the owner: cannot share it');
+        }
+        await _put(collection, id, e.item!.body, recipients: {...r!, memberId});
+      } else if (e.opened.signerId != _me.id) {
+        await _publish(topic, _reseal(topic, e));
+      }
+    }
+    await _publishAcl(acl.withAssignee(collection, id, memberId));
+    await _resealOrphans();
   }
 
-  Future<void> cancelOwnershipOffer() async {
-    _requireOwner();
-    await _publishAcl(acl.copyWith(clearOffer: true));
-  }
-
-  /// Takes over the ownership offered to this member: extends the ownership
-  /// chain, makes the former owner an editor, re-publishes the metadata and
-  /// re-signs the items only the owner may write.
-  Future<void> acceptOwnership() async {
-    _requireUnlocked();
-    if (!ownershipOfferedToMe) throw const AuthorizationException('no ownership offer for this member');
-    final old = acl;
-    await _publishAcl(
-      old.copyWith(
-        owners: [...old.owners, old.offer!],
-        editors: {...old.editors, old.ownerId}..remove(_me.id),
-        clearOffer: true,
-      ),
-    );
-    await _publishMeta(ChannelMeta(kdf: _meta!.kdf, keyCheck: _meta!.keyCheck, rev: _meta!.rev + 1));
+  /// Owner: re-signs every accepted item and tombstone (outside `self`
+  /// collections) whose signer may no longer write it under the current access
+  /// list (e.g. after a collection's policy changed), so that sessions joining
+  /// later do not reject it.
+  Future<void> _resealOrphans() async {
     for (final MapEntry(key: topic, value: e) in {..._entries}.entries) {
       final ref = topics.parse(topic)!;
-      if (acl.collections[ref.collection]?.writers == Writers.owner && e.opened.signerId != _me.id) {
+      final policy = acl.collections[ref.collection];
+      if (policy == null || policy.writers == Writers.self || policy.ephemeral) continue;
+      if (!_canWrite(e.opened.signerId, ref.collection!, ref.id!) && _canWrite(_me.id, ref.collection!, ref.id!)) {
         await _publish(topic, _reseal(topic, e));
       }
     }
   }
 
-  /// Owner only: changes the channel password.
-  ///
-  /// Publishes the new metadata first (other sessions lock until [unlock]),
-  /// then re-encrypts under the new key the access list and every item and
-  /// tombstone the owner may write (re-signed by the owner, revision + 1;
-  /// restricted items stay sealed for their recipients). The owner's own
-  /// `self` items move to their new pseudonyms. Other members' `self` items,
-  /// ephemeral items and rejected messages are cleared from the broker.
-  Future<void> changePassword(String newPassword, {KdfParams? kdf}) async {
-    _requireOwner();
-    final params = kdf ?? KdfParams.generate(_c);
-    final newKey = ProjectKey.derive(_c, newPassword, params);
-    final meta = ChannelMeta(kdf: params, keyCheck: newKey.check, rev: _meta!.rev + 1);
-    final entries = {..._entries};
-    final pending = {..._pending};
-    final currentAcl = acl;
-    final myPseudonym = _pseudonym(_me.id);
-    bool mine(String itemId) => itemId == myPseudonym || itemId.startsWith('$myPseudonym.');
-
-    _key!.dispose();
-    _key = newKey;
-    _pseudonyms.clear();
-    await _publishMeta(meta);
-    await _publishAcl(currentAcl);
-    for (final MapEntry(key: topic, value: e) in entries.entries) {
-      final ref = topics.parse(topic)!;
-      final policy = currentAcl.collections[ref.collection];
-      if (policy == null || policy.ephemeral) {
-        await _publish(topic, Uint8List(0));
-      } else if (policy.writers == Writers.self) {
-        await _publish(topic, Uint8List(0));
-        final i = e.item;
-        if (i != null && e.opened.signerId == _me.id && mine(ref.id!)) {
-          final newId = _pseudonym(_me.id) + ref.id!.substring(myPseudonym.length);
-          await put(ref.collection!, newId, i.body, recipients: i.recipients);
-        }
-      } else if (currentAcl.canWrite(_me.id, ref.collection!, ref.id!, isSelfItem: (_, _) => false)) {
-        await _publish(topic, _reseal(topic, e));
-      } else {
-        await _publish(topic, Uint8List(0));
-      }
-    }
-    _ownEphemeral.clear();
-    for (final topic in pending) {
-      await _publish(topic, Uint8List(0));
-    }
-  }
-
-  /// Derives the key from [password] and (re)loads all content. Used after
-  /// [PasswordChanged]; throws [WrongPasswordException].
-  Future<void> unlock(String password) async {
+  /// Derives the key from [password] and processes what arrived meanwhile.
+  /// Throws [WrongPasswordException].
+  void _deriveKey(String password) {
     final meta = _meta ?? (throw StateError('channel metadata not received yet'));
     final key = ProjectKey.derive(_c, password, meta.kdf);
     if (!bytesEqual(key.check, meta.keyCheck)) {
       key.dispose();
       throw const WrongPasswordException();
     }
-    _key?.dispose();
     _key = key;
-    _pseudonyms.clear();
     _reprocessAll();
   }
 
@@ -421,27 +451,41 @@ class SecureChannel {
     final topic = topics.sync(b64u(_c.randomBytes(9)));
     final done = _syncWaiters[topic] = Completer<void>();
     try {
-      await _transport.publish(topic, Uint8List(0));
-      await done.future.timeout(timeout, onTimeout: () => throw TransportException('sync timed out'));
+      await Future.wait([
+        _transport.publish(topic, Uint8List(0)),
+        done.future,
+      ], eagerError: true).timeout(timeout, onTimeout: () => throw TransportException('sync timed out'));
     } finally {
       _syncWaiters.remove(topic);
     }
   }
 
   /// Owner only: removes every retained message of the channel from the
-  /// broker (metadata last), then closes the session.
-  Future<void> deleteChannel() async {
-    _requireOwner();
-    int order(String t) => switch (topics.parse(t)?.kind) {
-      TopicKind.meta => 0,
-      TopicKind.acl => 1,
-      _ => 2,
-    };
-    final all = _raw.keys.toList()..sort((a, b) => order(b).compareTo(order(a)));
-    for (final t in all) {
-      await _transport.publish(t, Uint8List(0), retain: true);
-    }
-    await close(clearEphemeral: false);
+  /// broker (metadata last), then closes the session. Writes called after it
+  /// fail. If it fails (e.g. offline), the session stays open: retry, or
+  /// [close].
+  Future<void> deleteChannel() {
+    if (!isOwner) return Future.error(const AuthorizationException('only the channel owner can do this'));
+    final done = _serial(() async {
+      _requireOwner();
+      int order(String t) => switch (topics.parse(t)?.kind) {
+        TopicKind.meta => 0,
+        TopicKind.acl => 1,
+        _ => 2,
+      };
+      final all = _raw.keys.toList()..sort((a, b) => order(b).compareTo(order(a)));
+      for (final t in all) {
+        await _transport.publish(t, Uint8List(0), retain: true);
+      }
+      await _shutdown(clearEphemeral: false);
+    });
+    final closingNow = !_closing;
+    _closing = true; // writes called from now on are refused
+    return done.catchError((Object e, StackTrace st) {
+      // Not deleted (e.g. offline, or the reload failed): the session goes on.
+      if (closingNow && !_closed && _closeDone == null) _closing = false;
+      Error.throwWithStackTrace(e, st);
+    });
   }
 
   /// Checks ephemeral items for expiry now (also done periodically).
@@ -453,7 +497,8 @@ class SecureChannel {
         if (e.item case final i? when !_fresh(i, now)) (t, i),
     ];
     for (final (t, i) in stale) {
-      _entries[t] = _Entry(_entries[t]!.opened, null);
+      final e = _entries[t]!;
+      _entries[t] = _Entry(e.opened, null, e.recipients);
       _emit(ItemRemoved(i.collection, i.id, expired: true));
     }
   }
@@ -461,20 +506,42 @@ class SecureChannel {
   /// Stops syncing. By default also clears the ephemeral items published by
   /// this session (e.g. its position); items published by other sessions of
   /// the same identity (e.g. a background service) are left alone.
-  Future<void> close({bool clearEphemeral = true}) async {
+  ///
+  /// Waits (a few seconds at most) for writes in progress; later ones fail.
+  Future<void> close({bool clearEphemeral = true}) {
+    if (_closed) return _closeDone ?? Future.value();
+    return _closeDone ??= () async {
+      _closing = true;
+      await _writes.timeout(const Duration(seconds: 5), onTimeout: () {});
+      await _shutdown(clearEphemeral: clearEphemeral);
+    }();
+  }
+
+  Future<void>? _closeDone;
+
+  /// Clearing ephemeral items and unsubscribing are best effort: the session
+  /// is closed in any case.
+  Future<void> _shutdown({required bool clearEphemeral}) async {
     if (_closed) return;
-    if (clearEphemeral && _transport.state == TransportState.connected) {
-      for (final t in _ownEphemeral) {
-        await _transport.publish(t, Uint8List(0), retain: true);
-      }
-    }
     _closed = true;
     _pruneTimer?.cancel();
-    await _sub?.cancel();
-    if (_transport.state == TransportState.connected) await _transport.unsubscribe(topics.all);
-    _key?.dispose();
-    _key = null;
-    await _events.close();
+    try {
+      if (clearEphemeral && _transport.state == TransportState.connected) {
+        for (final t in _ownEphemeral) {
+          await _transport.publish(t, Uint8List(0), retain: true).timeout(const Duration(seconds: 5));
+        }
+      }
+      if (_transport.state == TransportState.connected) await _transport.unsubscribe(topics.all);
+    } catch (_) {
+      // the transport is gone or refuses: nothing more to do
+    } finally {
+      await _sub?.cancel();
+      await _stateSub?.cancel();
+      _key?.dispose();
+      _key = null;
+      // Not awaited: a listener paused in `await for` would block it forever.
+      unawaited(_events.close());
+    }
   }
 
   // ------------------------------------------------------------ internals
@@ -485,20 +552,19 @@ class SecureChannel {
 
   DateTime _now() => _clock().toUtc();
 
-  String _pseudonym(String memberId) {
-    final key = _key ?? (throw StateError('channel locked'));
-    return _pseudonyms[memberId] ??= b64u(
-      _c.sodium.crypto.genericHash(
-        message: Uint8List.fromList([...utf8Bytes('pep-self-v1'), ...publicKeyFromId(memberId)]),
-        key: key.pseudonymKey,
-        outLen: 16,
-      ),
-    );
-  }
+  String _pseudonym(String memberId) => _pseudonyms[memberId] ??= b64u(
+    _c.sodium.crypto.genericHash(
+      message: Uint8List.fromList([...utf8Bytes('pep-self-v1'), ...publicKeyFromId(memberId)]),
+      key: _requireKey().pseudonymKey,
+      outLen: 16,
+    ),
+  );
+
+  ProjectKey _requireKey() => _key ?? (throw StateError('channel key not derived yet'));
 
   bool _isSelfItem(String memberId, String itemId) {
     final p = _pseudonym(memberId);
-    return itemId == p || (itemId.startsWith('$p.') && _deviceRe.hasMatch(itemId.substring(p.length + 1)));
+    return itemId == p || (itemId.startsWith('$p.') && _suffixRe.hasMatch(itemId.substring(p.length + 1)));
   }
 
   bool _canWrite(String memberId, String collection, String id) =>
@@ -514,28 +580,95 @@ class SecureChannel {
 
   int _nextRev(String topic) => (_entries[topic]?.rev ?? 0) + 1;
 
+  /// The next revision of [topic], refused beyond [maxItemRev] for members
+  /// (clients would reject it).
+  int _checkRev(String topic) {
+    final rev = _nextRev(topic);
+    if (rev > maxItemRev && !isOwner) throw FormatPepException('revision $rev too high');
+    return rev;
+  }
+
   Future<void> _start() async {
     _sub = _transport.messages.listen((m) => _onMessage(m.topic, m.payload));
+    _connected = _transport.state == TransportState.connected;
+    _stateSub = _transport.states.listen((_) => _checkReconnect());
     await _transport.subscribe(topics.all);
     _pruneTimer = Timer.periodic(_pruneInterval, (_) => prune());
+  }
+
+  /// After a reconnect, the retained state may be outdated: reload it (see
+  /// [_ready]). A reconnect replaces a reload still running.
+  void _checkReconnect() {
+    final now = _transport.state == TransportState.connected;
+    final reconnected = now && !_connected;
+    _connected = now;
+    if (reconnected) {
+      _stale = true;
+      _subscribeAgain = true;
+    }
+    if (!now || _closed || _closeDone != null) return;
+    if (reconnected || (_stale && _reload == null)) _startReload();
+  }
+
+  /// Subscribes again if needed, then waits for the retained state (sync
+  /// barrier).
+  void _startReload() {
+    final seq = ++_reloads;
+    late final Future<Object?> reload;
+    Future<Object?> run() async {
+      Object? error;
+      try {
+        if (_subscribeAgain) {
+          await _transport.subscribe(topics.all);
+          if (seq == _reloads) _subscribeAgain = false;
+        }
+        await sync();
+      } catch (e) {
+        error = e;
+      }
+      if (identical(_reload, reload)) {
+        _reload = null;
+        if (error == null) _stale = false;
+      }
+      return error;
+    }
+
+    reload = run();
+    _reload = reload;
+  }
+
+  /// Waits before writing, after a reconnect, until the retained state (e.g.
+  /// a new access list) has arrived again. Throws [TransportException] if the
+  /// latest reload failed (the next write tries again).
+  Future<void> _ready() async {
+    while (true) {
+      _checkReconnect();
+      final r = _reload;
+      if (r == null) return;
+      final seq = _reloads;
+      final error = await r;
+      if (error != null && seq == _reloads) {
+        throw TransportException('could not reload the channel after reconnecting: $error');
+      }
+    }
   }
 
   void _emit(ChannelEvent e) {
     if (!_closed) _events.add(e);
   }
 
-  void _requireUnlocked() {
+  void _requireOpen() {
     if (_closed) throw StateError('channel closed');
-    if (locked) throw StateError('channel locked: the password changed');
+    _requireKey();
   }
 
   void _requireOwner() {
-    _requireUnlocked();
+    _requireOpen();
     if (!isOwner) throw const AuthorizationException('only the channel owner can do this');
   }
 
   CollectionPolicy _requireWrite(String collection, String id) {
-    _requireUnlocked();
+    _requireOpen();
     final policy = acl.collections[checkCollection(collection)];
     if (policy == null) throw AuthorizationException('collection "$collection" is not declared in the access list');
     if (!_canWrite(_me.id, collection, id)) throw AuthorizationException('not allowed to write $collection/$id');
@@ -612,7 +745,9 @@ class SecureChannel {
     final recipients = <String>{};
     Uint8List? sealedForMe;
     for (var i = 0; i < n; i++) {
-      final id = b64u(r.bytes(Identity.publicKeyBytes));
+      final pk = r.bytes(Identity.publicKeyBytes);
+      if (!Identity.isValidKey(_c, pk)) throw const FormatPepException('restricted item: invalid recipient key');
+      final id = b64u(pk);
       final sealed = r.bytes(_sealedKeyBytes);
       recipients.add(id);
       if (id == _me.id) sealedForMe = Uint8List.fromList(sealed);
@@ -676,18 +811,14 @@ class SecureChannel {
     _process(ref, topic, payload);
   }
 
-  /// After unlock: access list first (it names the current owner), then the
-  /// metadata if still unverified, then the items.
+  /// Once the key is derived: the access list first, then the items.
   void _reprocessAll() {
-    int order(TopicRef r) => switch (r.kind) {
-      TopicKind.acl => 0,
-      TopicKind.meta => 1,
-      _ => 2,
-    };
-    final all = [for (final e in _raw.entries) (topics.parse(e.key)!, e.key, e.value)]
-      ..sort((a, b) => order(a.$1).compareTo(order(b.$1)));
+    final all = [
+      for (final e in _raw.entries)
+        if (topics.parse(e.key)!.kind != TopicKind.meta) (topics.parse(e.key)!, e.key, e.value),
+    ]..sort((a, b) => (a.$1.kind == TopicKind.acl ? 0 : 1).compareTo(b.$1.kind == TopicKind.acl ? 0 : 1));
     for (final (ref, topic, payload) in all) {
-      if (ref.kind != TopicKind.meta || !_metaVerified) _process(ref, topic, payload);
+      _process(ref, topic, payload);
     }
   }
 
@@ -696,59 +827,39 @@ class SecureChannel {
       switch (ref.kind) {
         case TopicKind.meta:
           _onMeta(topic, payload);
-        // Removals need no key: apply them even while locked, otherwise an
-        // item cleared during a password change would survive the unlock.
+        // Before the key is derived (joining), payloads wait in _raw.
         case TopicKind.acl:
-          if (!locked || payload.isEmpty) _onAcl(topic, payload);
+          if (_key != null) _onAcl(topic, payload);
         case TopicKind.item:
-          if (!locked || payload.isEmpty) _onItem(ref.collection!, ref.id!, topic, payload);
+          if (_key != null) _onItem(ref.collection!, ref.id!, topic, payload);
         case TopicKind.sync:
           break;
       }
     } on PepException catch (e) {
-      // An item that no longer decrypts (e.g. still under the key from before
-      // a password change) is no longer part of the channel: stop showing it.
-      if (e is DecryptionException && ref.kind == TopicKind.item) _hide(ref, topic);
       _emit(MessageRejected(topic, e));
+    } catch (e) {
+      // Whatever a message makes fail, it must not stop the channel.
+      _emit(MessageRejected(topic, FormatPepException('unexpected content: $e')));
     }
   }
 
-  void _hide(TopicRef ref, String topic) {
-    final e = _entries[topic];
-    if (e?.item == null) return;
-    _entries[topic] = _Entry(e!.opened, null);
-    _emit(ItemRemoved(ref.collection!, ref.id!));
-  }
-
-  /// Metadata is signed by the current owner. Before the access list (and so
-  /// the ownership chain) is known, metadata not signed by the trusted key
-  /// from the link is accepted provisionally — only to derive the key — and
-  /// must be verified once the access list is known (see [join]).
+  /// Metadata is signed by the owner named in the join link, and never
+  /// changes: another key check is rejected.
   void _onMeta(String topic, Uint8List payload) {
     if (payload.isEmpty) {
       if (_meta != null) _emit(const ChannelDeleted());
       return;
     }
-    final a = _acl;
-    final signedByOwner = ChannelMeta.verifies(
-      _c,
-      topic: topic,
-      data: payload,
-      ownerKey: publicKeyFromId(a?.ownerId ?? _anchorId),
-    );
-    if (a != null && !signedByOwner) throw const AuthorizationException('meta not signed by the channel owner');
-    final meta = ChannelMeta.parseUnverified(payload);
+    final meta = ChannelMeta.open(_c, topic: topic, data: payload, ownerKey: publicKeyFromId(ownerId));
     final current = _meta;
-    if (current != null && _metaVerified && meta.rev <= current.rev) return;
-    _meta = meta;
-    _metaVerified = signedByOwner;
-    _metaAcceptedRaw = payload;
-    if (!_metaArrived.isCompleted) _metaArrived.complete();
-    if (current != null && _key != null && !bytesEqual(_key!.check, meta.keyCheck)) {
-      _key!.dispose();
-      _key = null;
-      _emit(const PasswordChanged());
+    if (current != null) {
+      if (!bytesEqual(current.keyCheck, meta.keyCheck)) {
+        throw const AuthorizationException('channel metadata with another key');
+      }
+      return;
     }
+    _meta = meta;
+    if (!_metaArrived.isCompleted) _metaArrived.complete();
   }
 
   void _onAcl(String topic, Uint8List payload) {
@@ -758,28 +869,15 @@ class SecureChannel {
     }
     final o = _env.open(key: _key!.dataKey, topic: topic, data: payload);
     if (o.deleted) throw const FormatPepException('access list tombstone');
+    if (o.signerId != ownerId) throw const AuthorizationException('access list not signed by the owner');
     final acl = ChannelAcl.decode(o.body);
-    acl.verifyChain(_c, channelId, _anchorId);
-    if (o.signerId != acl.ownerId) throw const AuthorizationException('access list not signed by the owner');
-    if (acl.offer != null && !acl.offerValid(_c, channelId)) {
-      throw const AuthorizationException('invalid ownership offer');
-    }
-    final current = _acl;
-    if (current != null && !current.isChainPrefixOf(acl)) {
-      throw const AuthorizationException('ownership chain does not extend the known one');
-    }
+    if (acl.ownerId != ownerId) throw const AuthorizationException('access list names another owner');
     final v = _aclVersion;
-    final grows = current != null && acl.owners.length > current.owners.length;
-    if (v != null && !grows && !(o.rev > v.$1 || (o.rev == v.$1 && o.time.isAfter(v.$2)))) return;
+    if (v != null && !_newer(o, v)) return;
     _acl = acl;
-    _aclVersion = (o.rev, o.time);
+    _aclVersion = o;
     if (!_aclArrived.isCompleted) _aclArrived.complete();
     _emit(AclUpdated(acl));
-    // Metadata signed by a new owner may have arrived before this access list.
-    final rawMeta = _raw[topics.meta];
-    if (rawMeta != null && (!_metaVerified || !bytesEqual(rawMeta, _metaAcceptedRaw ?? Uint8List(0)))) {
-      _process(const TopicRef(TopicKind.meta), topics.meta, rawMeta);
-    }
     for (final t in [..._pending]) {
       final raw = _raw[t];
       if (raw != null) _process(topics.parse(t)!, t, raw);
@@ -791,7 +889,7 @@ class SecureChannel {
       _pending.remove(topic);
       final e = _entries[topic];
       if (e?.item != null) {
-        _entries[topic] = _Entry(e!.opened, null);
+        _entries[topic] = _Entry(e!.opened, null, e.recipients);
         _emit(ItemRemoved(collection, id));
       }
       return;
@@ -807,16 +905,20 @@ class SecureChannel {
       _pending.add(topic);
       throw AuthorizationException('${o.signerId} may not write $collection/$id');
     }
+    // Leaves room for the revisions the owner adds when re-signing.
+    if (o.rev > maxItemRev && o.signerId != ownerId) throw FormatPepException('revision ${o.rev} too high');
     _pending.remove(topic);
     final known = _entries[topic];
     if (known != null && !known.olderThan(o)) return;
     final wasVisible = known?.item != null;
     ChannelItem? item;
+    Set<String>? recipients;
     var expired = false;
     if (!o.deleted) {
       if (o.restricted) {
-        final (recipients, body) = _unrestrict(topic, o.body);
-        if (body != null) item = _makeItem(collection, id, o, body, Set.unmodifiable(recipients));
+        final (r, body) = _unrestrict(topic, o.body);
+        recipients = Set.unmodifiable(r);
+        if (body != null) item = _makeItem(collection, id, o, body, recipients);
       } else {
         item = _makeItem(collection, id, o, o.body, null);
       }
@@ -825,7 +927,7 @@ class SecureChannel {
         expired = true;
       }
     }
-    _entries[topic] = _Entry(o, item);
+    _entries[topic] = _Entry(o, item, recipients);
     if (item != null) {
       _emit(ItemUpdated(item));
     } else if (wasVisible) {

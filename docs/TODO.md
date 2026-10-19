@@ -1,6 +1,10 @@
 # TODO — app layer
 
 Items that belong to the Flutter apps (the libraries already provide what they need).
+A web GUI proof of concept (branch `poc-web`, not merged) tried: map-first screen with IGN / OSM
+Rando / OSM / aerial layers, own position, tracks (cards, details, places with Maps/Waze), runs
+(designate the source, dog path / progress / distance / corridors, simulated dog), participants,
+identity export/import, join/create/invite. The real app's design will differ; parts get reused.
 
 ## Identity and devices
 - [ ] First start: generate the identity (`Identity.generate`), keep the seed in the platform's
@@ -27,12 +31,13 @@ Items that belong to the Flutter apps (the libraries already provide what they n
 - [ ] Project creation: pick friends; per track choose "everyone" or selected friends →
       `publishTrack(visibleTo: {...})`. Friends still need the join link + password to become
       members; visibility only restricts among members.
-- [ ] Choose editors among friends (`addEditor`).
-- [ ] Ownership transfer UI: owner picks a member → `offerOwnership`; on `OwnershipOffered`, ask
-      the member → `acceptOwnership`. Afterwards share only new join links (see DESIGN.md,
-      threat model).
-- [ ] Password change flow: on `PasswordChanged`, ask for the new password → `unlock`, then
-      re-publish own profile/position (other members' items are cleared by the owner).
+- [ ] Track owners: the project owner assigns each track to its setter (`assignTrack`, possibly
+      before the track exists: `newTrackId`); only that member can then change it.
+- [ ] Compromised or handed-over project (no password change, no ownership transfer, user
+      2026-10-19): "create a new project from this one" — from the local copy (info, tracks with their visibility, runs, assignments; maybe
+      recorded paths, re-signed as the new owner's copies) — then share the new link + password
+      with the members to keep and delete the old project. Needs a library helper (e.g.
+      `ProjectSession.createFrom(snapshot)`); see DESIGN.md *Compromised project*.
 - [ ] Show "visible to …" on restricted tracks (`Track.visibleTo`), resolving member ids to
       contact names.
 - [ ] Surface `MessageRejected` events in a diagnostics view.
@@ -41,6 +46,19 @@ Items that belong to the Flutter apps (the libraries already provide what they n
 - [ ] Background location sharing on iOS and Android (OwnTracks as behavioural reference):
       periodic `publishPosition`, stop with `clearPosition`.
 
+## Runs (events: several dogs on several tracks)
+- [ ] Run management UI for the leader: create a run (track, dog, handler), designate the
+      position source among members (incl. bots), change it during the day, start/finish.
+- [ ] Map: dog marker from the source's position, dog path (`dogPath`), covered part of the track
+      and percentage (`runProgress`), distance from the dog to the track, corridors.
+- [ ] Tell a member when they become (or stop being) a run's source (recording indicator).
+
 ## RU specifics
-- [ ] Define the `pep:` GPX extension elements for RU track details and objects (to come from
-      the project owner), then add typed accessors in `pep_content`.
+- [ ] Official trail sheet ("description de pose"): define the `pep:` elements for the
+      organizers' part (date, times of pose / prise de piste, start area, objects: placement
+      description and material, end, places) in the track (`TrailInfo`, written by the track
+      owner); forms in the app; generate the official printable documents.
+- [ ] Judge reports (user, 2026-10-18): the judge's part (conditions, encounters, observations
+      during the trail, on a tablet) is **not** in the track — the judge writes it on a separate
+      item of their own (single writer), e.g. a new `self`-style collection keyed by judge
+      pseudonym + track. Needs a library collection when it is designed.

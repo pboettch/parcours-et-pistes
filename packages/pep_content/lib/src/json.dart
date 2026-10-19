@@ -51,4 +51,11 @@ extension JsonGet on Json {
   }
 }
 
-DateTime msToDate(int ms) => DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+/// A time in milliseconds since the epoch, as found in content; out of
+/// [DateTime]'s range: [ContentFormatException].
+DateTime msToDate(int ms) {
+  if (ms < -_maxMs || ms > _maxMs) throw ContentFormatException('time $ms out of range');
+  return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+}
+
+const _maxMs = 8640000000000000;

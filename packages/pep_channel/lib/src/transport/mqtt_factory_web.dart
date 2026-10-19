@@ -12,5 +12,6 @@ MqttClient createMqttClient(Uri url, String clientId, {Set<String> pinnedCertifi
     '${url.scheme}://${url.host}${url.path}',
     clientId,
     url.hasPort ? url.port : (url.scheme == 'wss' ? 443 : 80),
+    maxConnectionAttempts: 1, // the transport retries itself
   );
 }

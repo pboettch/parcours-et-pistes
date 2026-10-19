@@ -1,3 +1,11 @@
-- [GPX trail app project](project-gpx-trail-app.md) — Parcours et Pistes: encrypted RU/MT trail sharing over MQTT; decisions, pep_core status (done), next = Flutter apps, gotchas
+- [Project overview](project-overview.md) — Parcours et Pistes: requirements, core decisions, package split, focus (libs), status
+- [Identity & devices](project-identity-devices.md) — one identity copied per device, IdentityBackup = export, no broker transfer, open IdentityExport proposal
+- [Runs & dog path](project-runs-dog-path.md) — position source, bots, single writer per item: recorder-only path, owner-only runs, track owners
+- [GUI direction](project-gui-direction.md) — overview window, single-track window (poseur/judge); web PoC parked
+- [Dev environment & gotchas](reference-dev-environment.md) — SDK, sodium, dev broker; library, CI and Flutter-web pitfalls
 - [Repo conventions](feedback-repo-conventions.md) — memories/Claude scripts live in repo `.claude/`, git-managed, commit often
 - [GitHub repo & CI](reference-github-repo.md) — pboettch/parcours-et-pistes, gh authenticated, CI workflow status
+- [CCO website prototype](reference-cco-prototype.md) — user's Leaflet GUI reference; local copy ~/devel/cco-prototype, private data
+- [Example data](project-example-data.md) — simulated fictional trails via seed_example.dart; never depend on folders outside the repo
+- [Pre-release formats](project-prerelease-formats.md) — nothing deployed: all formats stay v1, change in place, no bumps/migration
+- [No password change, no transfer](project-no-password-change.md) — both removed; compromised/handed-over project → new project from a local copy

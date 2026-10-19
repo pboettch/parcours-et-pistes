@@ -1,10 +1,9 @@
 import 'dart:typed_data';
 
-import '../codec/bytes.dart';
 import '../codec/json.dart';
-import '../crypto/pep_crypto.dart';
 import '../crypto/identity.dart';
 import '../errors.dart';
+import '../protocol/ids.dart';
 import '../protocol/topics.dart';
 
 /// Who may publish items of a collection.
@@ -12,10 +11,13 @@ enum Writers {
   /// Only the channel owner.
   owner,
 
-  /// The owner and the members listed as editors.
-  editors,
+  /// One writer per item: the member the owner assigned it to in the access
+  /// list ([ChannelAcl.assignees]). The owner may always write too, but only
+  /// re-signs (reassignment) or writes unassigned items.
+  assigned,
 
-  /// Every member, but only the item whose id is their own member id.
+  /// Every member, but only the items whose id is their own pseudonym
+  /// (optionally with a `.tag` suffix, see `SecureChannel.selfItemId`).
   self,
 }
 
@@ -59,88 +61,54 @@ class CollectionPolicy {
   int get hashCode => Object.hash(writers, ttl);
 }
 
-/// One link of the ownership chain: [memberId] became owner, attested by the
-/// previous owner's [signature] over [toSign] (null for the creator).
-class OwnerLink {
-  const OwnerLink(this.memberId, [this.signature]);
-
-  factory OwnerLink.fromJson(Json j) {
-    final sig = j.opt<String>('sig');
-    return OwnerLink(j.req<String>('id'), sig == null ? null : unb64u(sig));
-  }
-
-  final String memberId;
-  final Uint8List? signature;
-
-  /// What the previous owner signs to hand the channel over to [newOwnerId] as
-  /// chain entry number [index].
-  static Uint8List toSign(String channelId, int index, String newOwnerId) =>
-      (ByteWriter()
-            ..bytes(utf8Bytes('pep-owner-v1'))
-            ..lp16(utf8Bytes(channelId))
-            ..u32(index)
-            ..bytes(publicKeyFromId(newOwnerId)))
-          .take();
-
-  Json toJson() => {'id': memberId, if (signature != null) 'sig': b64u(signature!)};
-
-  @override
-  bool operator ==(Object other) =>
-      other is OwnerLink &&
-      other.memberId == memberId &&
-      (other.signature == null) == (signature == null) &&
-      (signature == null || bytesEqual(signature!, other.signature!));
-
-  @override
-  int get hashCode => memberId.hashCode;
-}
-
-/// Owner-signed access list (`acl` topic): the ownership chain, the editors,
-/// the collections of the channel with their policies, and an optional pending
-/// ownership [offer].
+/// Owner-signed access list (`acl` topic): the owner, the collections of the
+/// channel with their policies, and the writers of the items of `assigned`
+/// collections.
 ///
 /// Collections are declared here, by the owner, rather than hard-coded in the
 /// apps: every client enforces the rules of every declared collection, even
 /// ones it does not understand (items of those are passed through as opaque
 /// bytes). Items in undeclared collections are rejected.
 ///
-/// Ownership transfer: the owner publishes an [offer] (the next chain link,
-/// signed by them); the designated member accepts by publishing an access list
-/// whose chain ends with that link, signed with their own key. Join links pin
-/// any key of the chain; clients verify the chain from that key onwards.
+/// The owner is the channel's creator and never changes (the join link pins
+/// it): handing a project over means creating a new one.
 class ChannelAcl {
-  ChannelAcl({required this.owners, this.editors = const {}, required this.collections, this.offer}) {
-    if (owners.isEmpty) throw const FormatPepException('empty ownership chain');
-    if (owners.length > maxOwners) throw const FormatPepException('ownership chain too long');
-    for (final o in owners) {
-      publicKeyFromId(o.memberId);
-    }
-    if (offer != null) publicKeyFromId(offer!.memberId);
-    editors.forEach(publicKeyFromId);
+  ChannelAcl({required this.ownerId, required this.collections, this.assignees = const {}}) {
+    publicKeyFromId(ownerId);
     collections.keys.forEach(checkCollection);
     if (collections.length > maxCollections) throw const FormatPepException('too many collections');
+    var n = 0;
+    for (final MapEntry(key: c, value: items) in assignees.entries) {
+      if (collections[c]?.writers != Writers.assigned) {
+        throw FormatPepException('assignments for "$c", which is not an assigned collection');
+      }
+      for (final MapEntry(key: id, value: m) in items.entries) {
+        checkTopicId(id);
+        publicKeyFromId(m);
+      }
+      n += items.length;
+    }
+    if (n > maxAssignments) throw const FormatPepException('too many assignments');
   }
-
-  factory ChannelAcl.initial({
-    required String ownerId,
-    Set<String> editors = const {},
-    required Map<String, CollectionPolicy> collections,
-  }) => ChannelAcl(owners: [OwnerLink(ownerId)], editors: editors, collections: collections);
 
   factory ChannelAcl.fromJson(Json j) {
     j.checkVersion(version);
-    final offer = j.opt<Json>('offer');
     return ChannelAcl(
-      owners: List.unmodifiable([
-        for (final o in j.req<List<dynamic>>('owners'))
-          OwnerLink.fromJson(o is Json ? o : throw const FormatPepException('invalid ownership chain')),
-      ]),
-      editors: Set.unmodifiable(j.strList('editors')),
+      ownerId: j.req<String>('owner'),
       collections: Map.unmodifiable({
         for (final e in j.req<Json>('collections').entries)
           e.key: CollectionPolicy.fromJson(e.value is Json ? e.value as Json : const {}),
       }),
-      offer: offer == null ? null : OwnerLink.fromJson(offer),
+      assignees: Map.unmodifiable({
+        for (final e in j.optMap('assign').entries)
+          e.key: Map<String, String>.unmodifiable(
+            e.value is Json
+                ? (e.value as Json).map(
+                    (id, m) => MapEntry(id, m is String ? m : throw const FormatPepException('invalid assignment')),
+                  )
+                : throw const FormatPepException('invalid assignments'),
+          ),
+      }),
     );
   }
 
@@ -148,17 +116,19 @@ class ChannelAcl {
 
   static const version = 1;
   static const maxCollections = 64;
-  static const maxOwners = 256;
+  static const maxAssignments = 4096;
 
-  /// Ownership chain, creator first; the last entry is the current owner.
-  final List<OwnerLink> owners;
-  final Set<String> editors;
+  /// The channel's owner (its creator).
+  final String ownerId;
+
   final Map<String, CollectionPolicy> collections;
 
-  /// Pending ownership offer: the next chain link, signed by the current owner.
-  final OwnerLink? offer;
+  /// Writers of the items of `assigned` collections: collection → item id →
+  /// member id. Items without an entry are written by the owner.
+  final Map<String, Map<String, String>> assignees;
 
-  String get ownerId => owners.last.memberId;
+  /// The member assigned to item [itemId] of [collection], if any.
+  String? assigneeOf(String collection, String itemId) => assignees[collection]?[itemId];
 
   /// Whether [memberId] may publish (or delete) item [itemId] of [collection].
   /// [isSelfItem] decides whether an item id belongs to a member (`self`
@@ -173,66 +143,46 @@ class ChannelAcl {
     if (p == null) return false;
     return switch (p.writers) {
       Writers.owner => memberId == ownerId,
-      Writers.editors => memberId == ownerId || editors.contains(memberId),
+      Writers.assigned => memberId == ownerId || assigneeOf(collection, itemId) == memberId,
       Writers.self => isSelfItem(memberId, itemId),
     };
   }
 
-  /// Verifies the chain from the entry of [anchorId] (e.g. the owner pinned in
-  /// a join link) to the current owner. Throws [AuthorizationException].
-  void verifyChain(PepCrypto c, String channelId, String anchorId) {
-    final start = owners.lastIndexWhere((o) => o.memberId == anchorId);
-    if (start < 0) throw const AuthorizationException('the trusted owner is not in the ownership chain');
-    for (var i = start + 1; i < owners.length; i++) {
-      final sig = owners[i].signature;
-      if (sig == null ||
-          !Identity.verify(
-            c,
-            OwnerLink.toSign(channelId, i, owners[i].memberId),
-            sig,
-            publicKeyFromId(owners[i - 1].memberId),
-          )) {
-        throw const AuthorizationException('invalid ownership chain');
-      }
+  ChannelAcl copyWith({Map<String, CollectionPolicy>? collections, Map<String, Map<String, String>>? assignees}) {
+    final c = collections ?? this.collections;
+    return ChannelAcl(
+      ownerId: ownerId,
+      collections: Map.unmodifiable(c),
+      // Assignments of collections no longer `assigned` are dropped.
+      assignees: Map.unmodifiable({
+        for (final e in (assignees ?? this.assignees).entries)
+          if (e.value.isNotEmpty && c[e.key]?.writers == Writers.assigned)
+            e.key: Map<String, String>.unmodifiable(e.value),
+      }),
+    );
+  }
+
+  /// This access list with item [itemId] of [collection] assigned to
+  /// [memberId] (null: back to the owner).
+  ChannelAcl withAssignee(String collection, String itemId, String? memberId) {
+    final items = {...?assignees[collection]};
+    if (memberId == null) {
+      items.remove(itemId);
+    } else {
+      items[itemId] = memberId;
     }
+    return copyWith(assignees: {...assignees, collection: items});
   }
-
-  /// Whether the offer (if any) is validly signed by the current owner.
-  bool offerValid(PepCrypto c, String channelId) {
-    final o = offer;
-    return o?.signature != null &&
-        Identity.verify(
-          c,
-          OwnerLink.toSign(channelId, owners.length, o!.memberId),
-          o.signature!,
-          publicKeyFromId(ownerId),
-        );
-  }
-
-  /// Whether [other]'s chain starts with this chain (ownership only moves forward).
-  bool isChainPrefixOf(ChannelAcl other) =>
-      owners.length <= other.owners.length &&
-      [for (var i = 0; i < owners.length; i++) owners[i] == other.owners[i]].every((x) => x);
-
-  ChannelAcl copyWith({
-    List<OwnerLink>? owners,
-    Set<String>? editors,
-    Map<String, CollectionPolicy>? collections,
-    OwnerLink? offer,
-    bool clearOffer = false,
-  }) => ChannelAcl(
-    owners: List.unmodifiable(owners ?? this.owners),
-    editors: Set.unmodifiable(editors ?? this.editors),
-    collections: Map.unmodifiable(collections ?? this.collections),
-    offer: clearOffer ? null : (offer ?? this.offer),
-  );
 
   Json toJson() => {
     'v': version,
-    'owners': [for (final o in owners) o.toJson()],
-    'editors': editors.toList()..sort(),
+    'owner': ownerId,
     'collections': {for (final e in collections.entries) e.key: e.value.toJson()},
-    if (offer != null) 'offer': offer!.toJson(),
+    if (assignees.isNotEmpty)
+      'assign': {
+        for (final c in assignees.keys.toList()..sort())
+          c: {for (final id in assignees[c]!.keys.toList()..sort()) id: assignees[c]![id]},
+      },
   };
 
   Uint8List encode() => encodeJson(toJson());

@@ -37,8 +37,6 @@ session.events.listen((e) {
       print('track ${track.name}');
     case PositionUpdated(:final memberId, :final position):
       print('$memberId at ${position.lat},${position.lon}');
-    case PasswordChanged():
-      print('ask for the new password, then session.unlock(pw)');
     default:
   }
 });
@@ -46,10 +44,11 @@ await session.publishPosition(Position(lat: 45.2, lon: 5.3, time: DateTime.now()
 final objects = session.tracks.values.first.document.objects;   // RU objects = GPX waypoints
 ```
 
-Main API: `ProjectSession` (`create`, `join`, `publishTrack`, `deleteTrack`, `addEditor`,
-`removeEditor`, `updateProject`, `publishPosition`, `clearPosition`, `setMemberName`,
-`changePassword`, `unlock`, `sync`, `deleteProject`, `close`; state getters `project`, `tracks`,
-`members`, `positions`; `events` stream; `channel` for low-level access), `Gpx`, `JoinLink`,
+Main API: `ProjectSession` (`create`, `join`, `publishTrack`, `deleteTrack`, `assignTrack`,
+`updateProject`, `publishPosition`, `clearPosition`, `setMemberName`, runs (`putRun`,
+`setRunSource`, `startRun`, `finishRun`), `sync`, `deleteProject`,
+`close`; state getters `project`, `tracks`, `members`, `positions`, `runs`, `dogPath`,
+`runProgress`; `events` stream; `channel` for low-level access), `Gpx`, `JoinLink`,
 `Transport`. Content ↔ collection mapping: `PepCollections`.
 
 ### Web
