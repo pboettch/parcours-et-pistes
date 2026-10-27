@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# End-to-end scenario with the pep CLI against the local dev broker:
-# owner creates a project with a GPX, watches live; a participant joins, shares
-# name + position, gets a track assigned and updates it; a simulated dog run; the
-# owner deletes the project. Requires .claude/scripts/broker.sh start.
+# End-to-end scenario with the pep CLI against the local dev broker, one step
+# per CLI command: the owner creates a project with a GPX and watches live; a
+# participant joins, shares name + position, gets a track assigned, publishes
+# and removes it; a track hidden from her, then shared; tracks exported; an
+# identity export restored on a second device; a simulated dog run with a bot
+# as position source; the broker's view; refused actions; the owner deletes
+# the project. Requires .claude/scripts/broker.sh start.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$root/.claude/scripts/env.sh"
@@ -11,6 +14,14 @@ work="$(mktemp -d)"
 trap 'kill ${watch_pid:-0} 2>/dev/null || true; rm -rf "$work"' EXIT
 pep() { dart run pep_core:pep "$@" 2> >(sed 's/^\(Running build hooks\.\.\.\)*//' | grep -v '^$' >&2); }
 step() { printf '\n== %s\n' "$*"; }
+# `! cmd` never stops a `set -e` script: refused actions are checked with these.
+# The CLI exits 1 for a refusal (wrong password, not allowed), other codes for other errors.
+refused() {
+  local rc=0
+  "$@" || rc=$?
+  [[ $rc -eq 1 ]] || { echo "expected a refusal (exit 1), got $rc: $*" >&2; exit 1; }
+}
+absent() { if grep -q -- "$1"; then echo "unexpected: $1" >&2; exit 1; fi; }
 
 cat > "$work/trail.gpx" <<'GPX'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -43,29 +54,38 @@ sleep 3
 
 step "alice: info, wrong password, name, position"
 pep info "$link" "${A[@]}" -p pw1
-! pep info "$link" "${A[@]}" -p wrong
+refused pep info "$link" "${A[@]}" -p wrong
 pep name "$link" "${A[@]}" -p pw1 "Alice et Rex"
 pep pos "$link" "${A[@]}" -p pw1 45.2002 5.3001 --acc 4
 
 step "alice cannot push; owner assigns her a new track; alice pushes it, but no other"
-! pep push "$link" "${A[@]}" -p pw1 --gpx "$work/trail.gpx"
+refused pep push "$link" "${A[@]}" -p pw1 --gpx "$work/trail.gpx"
 mine=$(pep assign "${O[@]}" -p pw1 "$link" --new -- "$alice" | tail -1)
 pep push "$link" "${A[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Variante Alice" --id "$mine"
-! pep push "$link" "${A[@]}" -p pw1 --gpx "$work/trail.gpx"
+refused pep push "$link" "${A[@]}" -p pw1 --gpx "$work/trail.gpx"
 pep info "$link" "${O[@]}" -p pw1 | grep "Variante Alice" | grep -q "owner Alice et Rex"
 
 step "owner pushes a hidden track, then shares it with alice"
 hidden=$(pep push "$link" "${O[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Piste cachée" --visible-to="$owner_dummy" | cut -d' ' -f1)
-! pep info "$link" "${A[@]}" -p pw1 | grep -q "Piste cachée"
+pep info "$link" "${A[@]}" -p pw1 | absent "Piste cachée"
 echo "alice does not see it"
 pep push "$link" "${O[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Piste cachée" --id "$hidden" --visible-to="$alice"
 pep info "$link" "${A[@]}" -p pw1 | grep "Piste cachée"
 pep push "$link" "${O[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Piste cachée v2" --id "$hidden"
 pep info "$link" "${A[@]}" -p pw1 | grep -q "Piste cachée v2"
-! pep info "$link" "${B[@]}" -p pw1 | grep -q "Piste cachée"
+pep info "$link" "${B[@]}" -p pw1 | absent "Piste cachée"
 echo "an update keeps the visibility"
 pep push "$link" "${O[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Piste ouverte" --id "$hidden" --everyone
 pep info "$link" "${B[@]}" -p pw1 | grep "Piste ouverte"
+
+step "owner exports the tracks; alice removes her track, but no other"
+pep export "$link" "${O[@]}" -p pw1 --out "$work/export"
+[[ $(ls "$work/export"/*.gpx | wc -l) -eq 3 ]] || { echo "expected 3 exported tracks" >&2; exit 1; }
+grep -q "Piste ouverte" "$work/export"/*.gpx
+refused pep rm "$link" "${A[@]}" -p pw1 -- "$hidden"
+pep rm "$link" "${A[@]}" -p pw1 -- "$mine"
+pep info "$link" "${O[@]}" -p pw1 | absent "Variante Alice"
+echo "alice's track is gone"
 
 step "alice exports her identity and imports it on a 'new device'"
 exported=$(pep identity export "${A[@]}" --passphrase "sésame")
@@ -80,11 +100,11 @@ bot=$(pep id "${B[@]}" | tail -1)
 pep name "$link" "${B[@]}" -p pw1 --bot "Tractive"
 line=$(pep push "$link" "${O[@]}" -p pw1 --gpx "$work/line.gpx" | cut -d' ' -f1)
 run=$(pep run "$link" "${O[@]}" -p pw1 add --track "$line" --dog Rex --handler Ana --source="$bot" | tail -1)
-pep run "$link" "${O[@]}" -p pw1 start "$run"
+pep run "$link" "${O[@]}" -p pw1 -- start "$run"
 pep replay "$link" "${B[@]}" -p pw1 "$work/line.gpx" --speed 2 --rate 50 --interval 5
 pep run "$link" "${A[@]}" -p pw1 list | tee "$work/run.txt"
 grep -Eq "Rex / Ana on $line, running, source Tractive .*, (9[0-9]|100)%" "$work/run.txt"
-pep run "$link" "${O[@]}" -p pw1 finish "$run"
+pep run "$link" "${O[@]}" -p pw1 -- finish "$run"
 rolling=$(mosquitto_sub -V mqttv5 -p 18883 -t "pep/v1/$pid/path_pt/#" -W 1 -F '%t' 2>/dev/null | wc -l || true)
 [[ $rolling -eq 20 ]] || { echo "expected 20 rolling points, got $rolling" >&2; exit 1; }
 echo "20 rolling points"
@@ -94,15 +114,26 @@ echo "one full track"
 
 pep run "$link" "${A[@]}" -p pw1 list | grep -E "finished, source Tractive .*, (9[0-9]|100)%"
 
+step "a second run: the owner sets its source, alice cannot; the owner removes it"
+run2=$(pep run "$link" "${O[@]}" -p pw1 add --track "$line" --dog Max | tail -1)
+pep run "$link" "${O[@]}" -p pw1 -- source "$run2" "$alice"
+pep run "$link" "${A[@]}" -p pw1 list | grep -E "Max on $line, planned, source Alice et Rex"
+refused pep run "$link" "${A[@]}" -p pw1 -- source "$run2" "$bot"
+pep run "$link" "${O[@]}" -p pw1 -- rm "$run2"
+pep run "$link" "${A[@]}" -p pw1 list | absent "Max on"
+echo "run removed"
+
 step "broker view (admin wildcard): only meta is plaintext, no member ids in topics"
 mosquitto_sub -V mqttv5 -p 18883 -t "pep/v1/$pid/#" -W 1 -F '%t %l bytes, starts with: %x' 2>/dev/null \
   | sed -E 's/(starts with: .{16}).*/\1…/' || true
 
-! mosquitto_sub -V mqttv5 -p 18883 -t "pep/v1/$pid/#" -W 1 -F '%t' 2>/dev/null | grep -q -- "$alice"
+mosquitto_sub -V mqttv5 -p 18883 -t "pep/v1/$pid/#" -W 1 -F '%t' > "$work/topics.txt" 2>/dev/null || true
+grep -q "^pep/v1/$pid/meta$" "$work/topics.txt" # the broker answered
+absent "$alice" < "$work/topics.txt"
 
 step "alice cannot delete the project, nor assign tracks"
-! pep delete "$link" "${A[@]}" -p pw1
-! pep assign "${A[@]}" -p pw1 "$link" "$mine" -- owner
+refused pep delete "$link" "${A[@]}" -p pw1
+refused pep assign "${A[@]}" -p pw1 "$link" -- "$mine" owner
 pep run "$link" "${A[@]}" -p pw1 list | grep -E "finished, source .*, (9[0-9]|100)%"
 echo "runs and the dog path are unchanged"
 
