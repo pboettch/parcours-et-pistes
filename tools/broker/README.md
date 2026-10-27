@@ -16,6 +16,11 @@ certificate for 127.0.0.1/localhost in `certs/` (its SHA-256 fingerprint in
 `certs/server.sha256`, used as a pin by the VM tests) and the password file `passwd`. None of
 these are committed. Localhost only.
 
+On Ubuntu 26.04 and later, AppArmor confines `/usr/sbin/mosquitto` to `/etc/mosquitto`; allow
+this directory once through the profile's local override (`broker.sh` prints the commands):
+`echo "$PWD/tools/broker/** rwk," | sudo tee -a /etc/apparmor.d/local/mosquitto` then
+`sudo apparmor_parser -r /etc/apparmor.d/mosquitto`. CI does this before starting the broker.
+
 Note: mosquitto's ACL accepts subscriptions to denied topics and silently filters delivery;
 denied publishes get PUBACK reason 0x87 (reported by the library as `TransportException`).
 

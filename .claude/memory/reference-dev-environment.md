@@ -20,6 +20,11 @@ use multiplication, not `<<`, for u32.
 test 1.31 `CHROME_EXECUTABLE` is ignored when dart_test.yaml overrides chrome settings
 (`test.sh` adds a `google-chrome` shim). CI uses the Flutter SDK.
 
+**CI runner = Ubuntu 26.04** since ~2026-10-21 (`ubuntu-latest`; mosquitto 2.0.22). Its AppArmor 5
+profile `mosquitto` (`/usr/sbin/mosquitto`) only allows `/etc/mosquitto/**`: the dev broker failed
+with "Unable to open config file mosquitto.conf". Fix in ci.yml: `tools/broker/** rwk,` appended to
+`/etc/apparmor.d/local/mosquitto` + `apparmor_parser -r`; `broker.sh` prints the same hint locally.
+
 **Flutter web in the Browser pane** (learned on branch `poc-web`): debug (DDC) builds are slow/flaky →
 release build (`app.sh serve` there);
 the pane caches `localhost` → open `127.0.0.1:8686/?v=N`; coordinate clicks get lost on the
