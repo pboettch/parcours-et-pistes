@@ -5,11 +5,13 @@ section before changing behaviour, and update it in the same commit.
 
 ## Layering
 - `pep_channel` — transport, crypto, envelope, ACL, `SecureChannel`. Never interprets item bodies.
-- `pep_content` — data types, GPX + `pep` extensions, geometry (`TrackLine`, `TrailProgress`,
-  `TrailWalker`, `simulateTrail`). No crypto, no MQTT.
+- `pep_content` — data types (`ProjectInfo`, `MemberProfile`, `Position`, `Run`, `RecordedPath`,
+  `TrailInfo`), GPX + `pep` extensions, geometry (`TrackLine`, `TrailProgress`, `TrailWalker`,
+  `simulateTrail`). No crypto, no MQTT.
 - `pep_core` — `ProjectSession` (the apps' API) maps content onto channel collections
   (`PepCollections`); `pep` CLI in `bin/pep.dart`.
-- Dependencies point one way: `pep_core` → `pep_channel`, `pep_content`. Nothing else.
+- Dependencies between the packages point one way: `pep_core` → `pep_channel`, `pep_content`.
+  Nothing else.
 
 ## Invariants (do not break silently)
 - Nothing project-related on MQTT in clear except `meta` (format version, KDF salt/params).
@@ -17,8 +19,11 @@ section before changing behaviour, and update it in the same commit.
 - Member ids and device names never appear in topics (per-channel pseudonyms, keyed device tags).
 - Access rules live in the owner-signed ACL; collections are declared there, so older apps keep
   enforcing rules for content types they don't know (and ignore their content).
-- Forward compatibility: JSON documents carry `v` and keep unknown fields (`extra`); GPX keeps
-  unknown extensions. A wire-format change means a new version, documented in DESIGN.md.
+- Forward compatibility: JSON documents carry `v` and keep their `extra` object (other unknown
+  fields are dropped; `Position` has no `extra`); GPX keeps unknown extensions.
+- Versions: nothing has been released, so every format stays at version 1 and changes in place
+  (no version bumps, no compatibility code, no migration notes); describe only the current
+  format in DESIGN.md. After the first release, a wire-format change means a new version.
 - No identity transfer over the broker (user decision); identities move via `IdentityExport`.
 - No `dart:io` in `lib/` except behind the transport's conditional imports. In dart2js, use
   multiplication instead of `<<` for 32-bit values.

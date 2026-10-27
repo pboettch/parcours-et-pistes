@@ -1,5 +1,6 @@
 /// Content model of Parcours et Pistes: GPX tracks (with custom `pep`
-/// sections), positions, member profiles and project information.
+/// sections), positions, member profiles, project information, runs and
+/// recorded paths; track geometry, progress matching and simulated trails.
 ///
 /// Pure data and byte codecs — no cryptography and no networking; the secure
 /// transport is `pep_channel`.

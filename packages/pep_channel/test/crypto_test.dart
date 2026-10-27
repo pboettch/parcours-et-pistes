@@ -92,7 +92,7 @@ void main() {
       final a = Identity.generate(c);
       final exported = IdentityExport.export(c, a, 'correct horse', kdf: fastKdf(c));
       expect(exported, startsWith(IdentityExport.prefix));
-      expect(exported.length, lessThan(160), reason: 'fits a QR code easily');
+      expect(exported.length, 131, reason: 'fixed size (docs/DESIGN.md), fits a QR code easily');
       expect(IdentityExport.import(c, exported, 'correct horse').id, a.id);
       expect(() => IdentityExport.import(c, exported, 'wrong'), throwsA(isA<WrongPasswordException>()));
       final tampered = exported.substring(0, exported.length - 2) + (exported.endsWith('A') ? 'BB' : 'AA');

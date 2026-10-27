@@ -6,7 +6,8 @@ metadata:
 ---
 
 All memories and Claude-related scripts/config live in the repo
-(`/home/pmp/devel/parcours-et-pistes/.claude/`: `memory/`, `scripts/`, `settings.json`).
+(`/home/pmp/devel/parcours-et-pistes/.claude/`: `memory/`, `scripts/`, `agents/`, `reviews/`;
+the per-user `settings.local.json` is git-ignored, there is no shared `settings.json` yet).
 `~/.claude/projects/-home-pmp-devel-parcours-et-pistes/memory` is a symlink to `.claude/memory`.
 Everything is handled with git, and we **commit often**.
 

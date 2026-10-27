@@ -30,7 +30,9 @@ class ItemRemoved extends ChannelEvent {
   final bool expired;
 }
 
-/// The owner deleted the channel (metadata or access list cleared).
+/// The channel's metadata or access list was cleared: deleted by the owner, or
+/// vandalized by someone who knows the channel id (apps must not delete their
+/// local copy on this event).
 class ChannelDeleted extends ChannelEvent {
   const ChannelDeleted();
 }

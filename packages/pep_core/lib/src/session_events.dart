@@ -74,7 +74,9 @@ class PathUpdated extends SessionEvent {
   final String memberId;
 }
 
-/// The project was deleted by its owner.
+/// The project's metadata or access list was cleared: deleted by its owner, or
+/// vandalized by someone who knows the project id. Apps must not delete their
+/// local copy on this event (it can be the base of a new project).
 class ProjectDeleted extends SessionEvent {
   const ProjectDeleted();
 }

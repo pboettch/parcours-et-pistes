@@ -39,7 +39,8 @@ class ProjectInfo {
   final String? description;
   final Discipline discipline;
 
-  /// Fields unknown to this version, preserved on round trip.
+  /// Additional fields (the document's `extra` object), preserved as is on a
+  /// round trip. Other unknown fields are dropped.
   final Json extra;
 
   ProjectInfo copyWith({String? name, String? description, Json? extra}) => ProjectInfo(

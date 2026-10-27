@@ -13,7 +13,7 @@ import 'pep_crypto.dart';
 /// devices). The result is a short text suitable for a file or a QR code.
 ///
 /// Format: `pepid1.` + base64url(`ops u8 | mem u32 | salt[16] | nonce[24] |
-/// XChaCha20-Poly1305(Argon2id(passphrase), ad = "pepid1", seed[32])`).
+/// XChaCha20-Poly1305(Argon2id(passphrase), ad = "pepid1.", seed[32])`).
 abstract final class IdentityExport {
   static const prefix = 'pepid1.';
 

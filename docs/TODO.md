@@ -1,6 +1,8 @@
 # TODO — app layer
 
-Items that belong to the Flutter apps (the libraries already provide what they need).
+Items that belong to the Flutter apps. The libraries provide what they need, except where an item
+says it needs a library helper (create a project from a local copy, a personal channel, judge
+reports).
 A web GUI proof of concept (branch `poc-web`, not merged) tried: map-first screen with IGN / OSM
 Rando / OSM / aerial layers, own position, tracks (cards, details, places with Maps/Waze), runs
 (designate the source, dog path / progress / distance / corridors, simulated dog), participants,

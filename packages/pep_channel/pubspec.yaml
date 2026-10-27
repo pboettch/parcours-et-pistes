@@ -12,7 +12,6 @@ environment:
 dependencies:
   archive: ^4.3.0
   crypto: ^3.0.7
-  meta: ^1.19.0
   mqtt5_client: ^5.0.0
   sodium: ^4.1.1+1
   typed_data: ^1.4.0

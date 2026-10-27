@@ -262,7 +262,7 @@ class SecureChannel {
 
   String get channelId => topics.channelId;
 
-  /// This device's member id.
+  /// This identity's member id.
   String get memberId => _me.id;
 
   bool get isOwner => _me.id == ownerId;

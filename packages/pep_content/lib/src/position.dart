@@ -3,8 +3,9 @@ import 'dart:typed_data';
 import 'geo.dart';
 import 'json.dart';
 
-/// A live position (`pos` collection, one item per member). How long it stays
-/// visible is decided by the channel (collection TTL), from the publish time.
+/// A position: live (`pos` collection, one item per member and device; how
+/// long it stays visible is decided by the channel's collection TTL, from the
+/// publish time) or recorded (`path_pt` rolling items).
 class Position extends GeoPoint {
   Position({
     required double lat,

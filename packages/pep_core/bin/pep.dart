@@ -228,7 +228,7 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
       final (track, member) = switch ((extra, cmd.flag('new'))) {
         ([final m], true) => (s.newTrackId(), m),
         ([final t, final m], false) => (t, m),
-        _ => throw const FormatPepException('usage: pep assign <link> <track id>|--new -- <member>|owner'),
+        _ => throw const FormatPepException('usage: pep assign <link> [--new] -- [<track id>] <member>|owner'),
       };
       await s.assignTrack(track, member == 'owner' ? null : member);
       print(track);
@@ -339,8 +339,8 @@ Future<void> _runCommand(ProjectSession s, ArgResults cmd, List<String> extra) a
       await s.deleteRun(id);
     default:
       throw const FormatPepException(
-        'usage: pep run <link> add --track T --dog D [--handler H] [--source M] | list'
-        ' | source <run> -- <member> | start <run> | finish <run> | rm <run>',
+        'usage: pep run <link> add --track T --dog D [--handler H] [--source M] | [--] list'
+        ' | source <run> <member> | start <run> | finish <run> | rm <run>',
       );
   }
 }
@@ -455,24 +455,30 @@ Never _usage(ArgParser p, [String? error]) {
 
 commands:
   id                                  print this identity's member id (and fingerprint)
-  identity export | import <export>   passphrase-protected identity export (backup, other devices)
-  create --name N [--discipline ru|mt] [--gpx f]...   create a project, print its join link
-  info <link>                         show project and tracks
-  watch <link>                        follow tracks, members and positions live
-  push <link> --gpx f [--id T] [--name N] [--visible-to M]... [--everyone]
+  identity export | import <export> [--passphrase P]
+                                      passphrase-protected identity export (backup, other devices)
+  create --name N [--discipline ru|mt] [--description D] [--ttl s] [--gpx f]... [--link-broker URL]
+                                      create a project, print its join link (--ttl: position TTL)
+  info <link>                         show project, tracks and runs
+  watch <link>                        follow the project live: tracks, members, positions, runs,
+                                      recorded paths, rejected messages
+  push <link> --gpx f [--id T] [--name N] [--description D] [--visible-to M]... [--everyone]
                                       publish a track (owner), or update it (its owner)
-  rm <link> <track id>                delete a track (its owner)
+  rm <link> [--] <track id>           delete a track (its owner)
   export <link> [--out dir]           write all tracks as .gpx files
   pos <link> <lat> <lon> [--acc m]    share a position
   name <link> <display name> [--bot]  set your display name (--bot: automated member)
   run <link> add --track T --dog D [--handler H] [--source M]   create a run (owner)
-  run <link> list | source <run> -- <member> | start <run> | finish <run> | rm <run>
-                                      manage runs; the source shares the dog's position
-  replay <link> <gpx> [--speed m/s] [--rate x] [--name N] [--bot] [--record]
+  run <link> [--] list | source <run> <member> | start <run> | finish <run> | rm <run>
+                                      manage runs (owner); the source shares the dog's position
+  replay <link> <gpx> [--speed m/s] [--rate x] [--interval s] [--name N] [--bot] [--record]
                                       simulate a dog walking the track (publishes positions)
-  assign <link> <track>|--new -- <member>|owner   give a track to its only writer (owner; prints the
-                                      track id; "--" because ids may start with "-")
+  assign <link> [--new] -- [<track>] <member>|owner
+                                      give a track (--new: a new track id) to its only writer
+                                      (owner); prints the track id
   delete <link>                       delete the project from the broker (owner)
+
+Put "--" before ids and member ids: they may start with "-".
 
 options:
 ${p.usage}''');

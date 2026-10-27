@@ -7,8 +7,9 @@ import '../codec/bytes.dart';
 import '../errors.dart';
 import 'pep_crypto.dart';
 
-/// A device's Ed25519 signing identity. There is no central user database:
-/// members are identified by their public key.
+/// A user's Ed25519 signing identity: one per user, copied to each of their
+/// devices (`IdentityExport`). There is no central user database: members are
+/// identified by their public key.
 class Identity {
   Identity._(this._c, this._keyPair);
 
