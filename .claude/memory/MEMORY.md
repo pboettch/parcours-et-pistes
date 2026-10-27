@@ -1,5 +1,5 @@
 - [Project overview](project-overview.md) — Parcours et Pistes: requirements, core decisions, package split, focus (libs), status
-- [Identity & devices](project-identity-devices.md) — one identity copied per device, IdentityBackup = export, no broker transfer, open IdentityExport proposal
+- [Identity & devices](project-identity-devices.md) — one identity copied per device, IdentityExport (ex IdentityBackup), no broker transfer, open activation-code proposal
 - [Runs & dog path](project-runs-dog-path.md) — position source, bots, single writer per item: recorder-only path, owner-only runs, track owners
 - [GUI direction](project-gui-direction.md) — overview window, single-track window (poseur/judge); web PoC parked
 - [Dev environment & gotchas](reference-dev-environment.md) — SDK, sodium, dev broker; library, CI and Flutter-web pitfalls

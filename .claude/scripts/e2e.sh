@@ -67,10 +67,10 @@ echo "an update keeps the visibility"
 pep push "$link" "${O[@]}" -p pw1 --gpx "$work/trail.gpx" --name "Piste ouverte" --id "$hidden" --everyone
 pep info "$link" "${B[@]}" -p pw1 | grep "Piste ouverte"
 
-step "alice backs up her identity and restores it on a 'new device'"
-backup=$(pep identity export "${A[@]}" --passphrase "sésame")
-echo "backup: ${backup:0:24}… (${#backup} chars)"
-restored=$(pep identity import "$backup" --identity "$work/alice-tablet.id" --passphrase "sésame" | tail -1)
+step "alice exports her identity and imports it on a 'new device'"
+exported=$(pep identity export "${A[@]}" --passphrase "sésame")
+echo "export: ${exported:0:24}… (${#exported} chars)"
+restored=$(pep identity import "$exported" --identity "$work/alice-tablet.id" --passphrase "sésame" | tail -1)
 [[ $restored == "$alice" ]] || { echo "restored identity differs" >&2; exit 1; }
 echo "same member id on the new device"
 pep pos "$link" --identity "$work/alice-tablet.id" --device tablet -p pw1 45.2010 5.3010

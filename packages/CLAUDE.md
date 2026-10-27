@@ -19,7 +19,7 @@ section before changing behaviour, and update it in the same commit.
   enforcing rules for content types they don't know (and ignore their content).
 - Forward compatibility: JSON documents carry `v` and keep unknown fields (`extra`); GPX keeps
   unknown extensions. A wire-format change means a new version, documented in DESIGN.md.
-- No identity transfer over the broker (user decision); identities move via `IdentityBackup`.
+- No identity transfer over the broker (user decision); identities move via `IdentityExport`.
 - No `dart:io` in `lib/` except behind the transport's conditional imports. In dart2js, use
   multiplication instead of `<<` for 32-bit values.
 

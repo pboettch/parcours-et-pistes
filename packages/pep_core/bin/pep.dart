@@ -30,7 +30,7 @@ Future<void> main(List<String> argv) async {
 
   parser
     ..addCommand('id', _common())
-    ..addCommand('identity', _common()..addOption('passphrase', help: 'Backup passphrase (else prompt)'))
+    ..addCommand('identity', _common()..addOption('passphrase', help: 'Export passphrase (else prompt)'))
     ..addCommand(
       'create',
       _common()
@@ -128,18 +128,18 @@ Future<void> _run(ArgResults cmd, _Opt opt, PepCrypto crypto, Identity me) async
       return;
 
     case 'identity':
-      // Export: prints a passphrase-protected backup. Import: replaces the
-      // identity file with the one from a backup.
-      final passphrase = cmd.option('passphrase') ?? _prompt('backup passphrase: ');
+      // Export: prints the passphrase-protected identity (for a backup or
+      // another device). Import: replaces the identity file with an export.
+      final passphrase = cmd.option('passphrase') ?? _prompt('export passphrase: ');
       switch (rest) {
         case ['export']:
-          print(IdentityBackup.export(crypto, me, passphrase));
-        case ['import', final backup]:
-          final id = IdentityBackup.import(crypto, backup, passphrase);
+          print(IdentityExport.export(crypto, me, passphrase));
+        case ['import', final exported]:
+          final id = IdentityExport.import(crypto, exported, passphrase);
           _saveIdentity(id, opt('identity') ?? _defaultIdentityPath());
           print(id.id);
         default:
-          throw const FormatPepException('usage: pep identity export | import <backup>');
+          throw const FormatPepException('usage: pep identity export | import <export>');
       }
       return;
 
@@ -455,7 +455,7 @@ Never _usage(ArgParser p, [String? error]) {
 
 commands:
   id                                  print this identity's member id (and fingerprint)
-  identity export | import <backup>   passphrase-protected identity backup (copy to other devices)
+  identity export | import <export>   passphrase-protected identity export (backup, other devices)
   create --name N [--discipline ru|mt] [--gpx f]...   create a project, print its join link
   info <link>                         show project and tracks
   watch <link>                        follow tracks, members and positions live

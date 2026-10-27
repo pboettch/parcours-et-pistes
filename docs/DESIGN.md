@@ -60,7 +60,7 @@ parameters takes ~75 ms in Chromium, ~20 ms on the Dart VM (2026 desktop hardwar
 ## Identities, roles, trust
 - **One identity per user**, an Ed25519 key pair; the member id (unpadded base64url of the
   public key) is project-independent. The 32-byte seed is kept in secure storage and **copied to
-  the user's other devices** with `IdentityBackup` (Argon2id + XChaCha20-Poly1305 under a
+  the user's other devices** with `IdentityExport` (Argon2id + XChaCha20-Poly1305 under a
   passphrase, ~130 characters, QR-friendly). A lost device means the identity must be considered
   compromised: the user creates a new one and is re-added by friends and projects.
 - `fingerprintOf(memberId)`: 80 bits of SHA-256 as `XXXX-XXXX-XXXX-XXXX` (Crockford base32),
