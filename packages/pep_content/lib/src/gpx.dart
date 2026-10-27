@@ -131,9 +131,14 @@ class GpxTrack {
 }
 
 /// GPX 1.1 reader/writer: tracks, routes, waypoints and the `<extensions>`
-/// sections of the file, its metadata, tracks/routes and points. Extension
-/// content (ours in [pepNamespace] and other tools') is preserved on a
-/// parse → write round trip; other unknown elements are dropped.
+/// sections of the file, its metadata, waypoints, tracks/routes and points.
+/// Extension content (ours in [pepNamespace] and other tools') is preserved on
+/// a parse → write round trip. Everything else not modelled here is dropped:
+/// unknown elements, segment extensions and GPX elements such as `<link>`,
+/// `<author>`, `<copyright>`, `<bounds>`, `<keywords>`, track `<src>`/`<number>`,
+/// track/route point fields other than `<ele>` and `<time>`, and waypoint fields
+/// other than those of [GpxWaypoint]. Unreadable `<ele>` and `<time>` values are
+/// skipped.
 class Gpx {
   Gpx({
     this.name,
@@ -190,7 +195,8 @@ class Gpx {
     );
   }
 
-  /// GPX metadata name: the name of the track as shown in the app.
+  /// GPX metadata name (`<metadata><name>`). A display name may fall back to
+  /// the first track's name (pep_core's `Track.name` does).
   final String? name;
 
   /// GPX metadata description.

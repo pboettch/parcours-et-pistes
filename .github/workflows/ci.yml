@@ -54,6 +54,12 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q mosquitto
+          # Ubuntu 26.04's AppArmor profile limits mosquitto to /etc/mosquitto:
+          # allow the dev broker's directory through the profile's local override.
+          if [[ -f /etc/apparmor.d/mosquitto ]]; then
+            echo "$GITHUB_WORKSPACE/tools/broker/** rwk," | sudo tee -a /etc/apparmor.d/local/mosquitto
+            sudo apparmor_parser -r /etc/apparmor.d/mosquitto
+          fi
           .claude/scripts/broker.sh start
 
       - name: Fetch sodium.js for browser tests

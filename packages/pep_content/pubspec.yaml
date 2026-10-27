@@ -1,7 +1,8 @@
 name: pep_content
 description: >-
   Content model of Parcours et Pistes: GPX tracks with custom pep sections,
-  positions, member profiles and project information. Pure data, no crypto,
+  positions, member profiles, project information, runs and recorded paths;
+  track geometry, progress matching and simulation. Pure data, no crypto,
   no networking.
 version: 0.1.0
 publish_to: none

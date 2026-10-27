@@ -24,7 +24,8 @@ class MemberProfile {
   /// An automated member, e.g. a service feeding a GPS collar's positions.
   final bool bot;
 
-  /// Fields unknown to this version, preserved on round trip.
+  /// Additional fields (the document's `extra` object), preserved as is on a
+  /// round trip. Other unknown fields are dropped.
   final Json extra;
 
   Json toJson() => {'v': version, 'name': name, if (bot) 'bot': true, if (extra.isNotEmpty) 'extra': extra};

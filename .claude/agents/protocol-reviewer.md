@@ -21,9 +21,11 @@ below.
    associated data; member ids leaking into topics; new authorization paths that trust
    unauthenticated data (empty payloads are removals anyone can send); key material not disposed;
    password/identity handling (KDF parameters bounded on input, no secrets in logs or errors).
-2. **Protocol compatibility**: wire-format changes without a version bump or DESIGN.md update;
-   older clients' behaviour with the new data (unknown collections, unknown JSON fields,
-   tombstones, retained messages); reassignment (owner re-signing).
+2. **Protocol compatibility**: wire-format changes without a DESIGN.md update. Nothing has been
+   released yet: formats stay at version 1 and change in place, so do not ask for version bumps
+   or migration code (after the first release, a format change needs a new version). Older
+   clients' behaviour with the new data (unknown collections, unknown JSON fields, tombstones,
+   retained messages); reassignment (owner re-signing).
 3. **Correctness under concurrency and the network**: ordering by (rev, time), items that
    should have a single writer but can get several (re-signing, devices of one user), messages
    arriving before the ACL, offline/reconnect (reload before writing), expiry

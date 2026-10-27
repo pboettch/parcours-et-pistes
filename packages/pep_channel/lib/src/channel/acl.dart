@@ -12,8 +12,9 @@ enum Writers {
   owner,
 
   /// One writer per item: the member the owner assigned it to in the access
-  /// list ([ChannelAcl.assignees]). The owner may always write too, but only
-  /// re-signs (reassignment) or writes unassigned items.
+  /// list ([ChannelAcl.assignees]), else the owner. The channel also accepts
+  /// the owner's writes to assigned items (needed to re-sign them on
+  /// reassignment); the apps' facade lets only the assignee change them.
   assigned,
 
   /// Every member, but only the items whose id is their own pseudonym

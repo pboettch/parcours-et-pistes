@@ -1,4 +1,6 @@
-/// Base class of all errors raised by pep_core.
+/// Base class of the protocol errors of pep_channel (also raised through
+/// pep_core). Transport failures are `TransportException`s; misuse, such as
+/// writing to a closed channel, raises a `StateError`.
 class PepException implements Exception {
   const PepException(this.message);
 

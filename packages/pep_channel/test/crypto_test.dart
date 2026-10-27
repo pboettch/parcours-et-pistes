@@ -88,16 +88,16 @@ void main() {
       expect(a.openSealed(Uint8List.fromList(sealed)..[10] ^= 1), isNull);
     });
 
-    test('identity backup round trip', () {
+    test('identity export round trip', () {
       final a = Identity.generate(c);
-      final backup = IdentityBackup.export(c, a, 'correct horse', kdf: fastKdf(c));
-      expect(backup, startsWith(IdentityBackup.prefix));
-      expect(backup.length, lessThan(160), reason: 'fits a QR code easily');
-      expect(IdentityBackup.import(c, backup, 'correct horse').id, a.id);
-      expect(() => IdentityBackup.import(c, backup, 'wrong'), throwsA(isA<WrongPasswordException>()));
-      final tampered = backup.substring(0, backup.length - 2) + (backup.endsWith('A') ? 'BB' : 'AA');
-      expect(() => IdentityBackup.import(c, tampered, 'correct horse'), throwsA(isA<PepException>()));
-      expect(() => IdentityBackup.import(c, 'hello', 'x'), throwsA(isA<FormatPepException>()));
+      final exported = IdentityExport.export(c, a, 'correct horse', kdf: fastKdf(c));
+      expect(exported, startsWith(IdentityExport.prefix));
+      expect(exported.length, 131, reason: 'fixed size (docs/DESIGN.md), fits a QR code easily');
+      expect(IdentityExport.import(c, exported, 'correct horse').id, a.id);
+      expect(() => IdentityExport.import(c, exported, 'wrong'), throwsA(isA<WrongPasswordException>()));
+      final tampered = exported.substring(0, exported.length - 2) + (exported.endsWith('A') ? 'BB' : 'AA');
+      expect(() => IdentityExport.import(c, tampered, 'correct horse'), throwsA(isA<PepException>()));
+      expect(() => IdentityExport.import(c, 'hello', 'x'), throwsA(isA<FormatPepException>()));
     });
 
     test('sign / verify', () {

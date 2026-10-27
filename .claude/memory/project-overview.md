@@ -39,16 +39,19 @@ placeholders only (`TrailInfo`).
 the app layer for the three platforms comes soon. The web PoC is not on `main` (branch `poc-web`,
 see [[project-gui-direction]]).
 
-**Status (2026-10-19):** libraries complete and tested (VM + Chromium, memory broker + mosquitto),
-`pep` CLI and `.claude/scripts/e2e.sh` pass; web GUI PoC on the unmerged branch `poc-web`.
-PR #3 (branch `runs-dog-path`, libraries + tooling only; replaces PR #2) brings runs, the
-recorder-only dog path, per-track owners (no editors) and removes the password change
-([[project-no-password-change]]). Its history was rewritten into a few clean commits on the
-user's request (they force-push; old commits on the local branch
-`archive/runs-dog-path-pre-rewrite`); then a protocol-reviewer pass (user sets its effort to
-xhigh).
+**Status (2026-10-27):** libraries complete and tested (VM + Chromium, memory broker + mosquitto),
+CI green on `main`; `pep` CLI and `.claude/scripts/e2e.sh` pass; web GUI PoC on the unmerged
+branch `poc-web`. PR #3 (runs, recorder-only dog path, per-track owners, no password change, no
+ownership transfer — [[project-no-password-change]]) was merged on 2026-10-19 (`f976ba8`); its
+history had been rewritten into a few clean commits on the user's request (old commits on the
+local branch `archive/runs-dog-path-pre-rewrite`). The user runs the protocol-reviewer at
+effort xhigh.
+2026-10-27, branch `docs-sync`: docs, READMEs, memory and code comments checked against the code
+and aligned; e2e covers every CLI command and its refusal checks now really fail the script;
+`IdentityBackup` renamed `IdentityExport` ([[project-identity-devices]]).
 
-**Open topics:** create a project from a local copy (`docs/TODO.md`); IdentityBackup helpers ([[project-identity-devices]]); RU details from the user;
+**Open topics:** library bug: TTL bounds not checked when an access list is written
+(`.claude/reviews/2026-10-27-docs-sync.md`); create a project from a local copy (`docs/TODO.md`); IdentityExport activation code / passphrase rules ([[project-identity-devices]]); RU details from the user;
 default production broker + wildcard restriction; background location; app deep-link domain.
 
 Related: [[project-identity-devices]], [[project-runs-dog-path]], [[project-gui-direction]],

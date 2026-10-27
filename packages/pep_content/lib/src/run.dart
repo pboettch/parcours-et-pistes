@@ -68,7 +68,8 @@ class Run {
 
   final DateTime? started, finished;
 
-  /// Fields unknown to this version, preserved on round trip.
+  /// Additional fields (the document's `extra` object), preserved as is on a
+  /// round trip. Other unknown fields are dropped.
   final Json extra;
 
   /// The member currently sharing the dog's position.

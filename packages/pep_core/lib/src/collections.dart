@@ -16,10 +16,12 @@ abstract final class PepCollections {
   /// owner.
   static const track = 'track';
 
-  /// Member profiles (`MemberProfile`), item id = member id.
+  /// Member profiles (`MemberProfile`), item id = member pseudonym
+  /// (`SecureChannel.selfItemId`).
   static const member = 'member';
 
-  /// Live positions (`Position`), item id = member id, expire after the TTL.
+  /// Live positions (`Position`), item id = member pseudonym [+ `.` device
+  /// tag], expire after the TTL.
   static const position = 'pos';
 
   static const defaultPositionTtl = Duration(minutes: 30);

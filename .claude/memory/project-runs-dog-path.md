@@ -16,15 +16,17 @@ Every item has a single writer:
 - **Dog path = recorder only (user design, replaces leader compaction):** the recorder publishes
   its live position, the last points on **20 rolling retained topics** (slot = counter mod 20, the
   timestamp gives the order) and, every ~30 s (configurable), an updated **full track with all its
-  points, one per recorder** (user chose one per recorder over one per run). A newcomer reads the
+  points, per recording device** (user chose per recorder over one per run), in segments of 1000
+  points (only the open one is republished). A newcomer reads the
   run's current source X, X's full track + X's rolling points (merged by time). No compaction, no
   purge, no editor writing others' points.
 - **Runs: owner only.**
 - **Tracks: one owner per track** (single writer), assigned by the project owner; the global
   "editors" role disappears. The project owner itself is fixed (no ownership transfer,
   [[project-no-password-change]]). (User chose this over "project owner can always edit too".)
-- Bugs to fix anyway: stale `_decode` cache, deterministic tie-break for equal (rev, time), close
-  when locked, MQTT publishes hanging after a disconnect.
+- Bugs found then, all fixed in PR #3: stale `_decode` cache; tie rule for equal (rev, time) =
+  the one received last wins, like the broker (chosen over a deterministic tie-break); MQTT
+  publishes hanging after a disconnect. ("Close when locked" is moot: no locked state.)
 - Later: the judge writes reports on a track, on a separate topic of the judge user.
 
 **No password change for now (user, 2026-10-19):** "Forget the password change mechanism. We will
@@ -33,7 +35,7 @@ local copy (anyone can create a project from one synced locally). The intermedia
 (kept collections with a seed, owner re-encrypting recorded paths) was removed with it; it is on
 the local branch `archive/runs-dog-path-pre-rewrite` if password changes come back.
 
-**Implemented 2026-10-18** (branch `runs-dog-path`): `Writers.assigned` + ACL `assign` map (format v1),
+**Implemented 2026-10-18** (PR #3, merged 2026-10-19): `Writers.assigned` + ACL `assign` map (format v1),
 `SecureChannel.assign` (owner re-signs on reassignment), `RecordedPath`,
 `ProjectSession.flushPath`/`pathInterval`/`assignTrack`. 
 

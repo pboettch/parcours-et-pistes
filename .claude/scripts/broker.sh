@@ -34,7 +34,15 @@ case "${1:-status}" in
   start)
     if running; then echo "already running (pid $(cat "$pidfile"))"; exit 0; fi
     prepare
-    (cd "$dir" && "$bin" -c mosquitto.conf -d)
+    if ! (cd "$dir" && "$bin" -c mosquitto.conf -d); then
+      # Ubuntu 26.04+ (AppArmor 5) confines /usr/sbin/mosquitto to /etc/mosquitto.
+      if [[ -f /etc/apparmor.d/mosquitto ]]; then
+        echo "AppArmor keeps $bin out of $dir; allow it with:" >&2
+        echo "  echo '$dir/** rwk,' | sudo tee -a /etc/apparmor.d/local/mosquitto" >&2
+        echo "  sudo apparmor_parser -r /etc/apparmor.d/mosquitto" >&2
+      fi
+      exit 1
+    fi
     sleep 0.5
     pgrep -n -f "$bin -c mosquitto.conf" > "$pidfile"
     echo "started (pid $(cat "$pidfile")): mqtt :18883  ws :18080  mqtts :18884  wss :18443  auth :18885"

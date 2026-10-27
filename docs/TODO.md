@@ -1,6 +1,8 @@
 # TODO — app layer
 
-Items that belong to the Flutter apps (the libraries already provide what they need).
+Items that belong to the Flutter apps. The libraries provide what they need, except where an item
+says it needs a library helper (create a project from a local copy, a personal channel, judge
+reports).
 A web GUI proof of concept (branch `poc-web`, not merged) tried: map-first screen with IGN / OSM
 Rando / OSM / aerial layers, own position, tracks (cards, details, places with Maps/Waze), runs
 (designate the source, dog path / progress / distance / corridors, simulated dog), participants,
@@ -11,8 +13,8 @@ identity export/import, join/create/invite. The real app's design will differ; p
       secure storage (Keychain / Keystore / web: encrypted IndexedDB).
 - [ ] Generate a **device id** once per installation (`[A-Za-z0-9_-]{1,32}`) and pass it as
       `deviceId` to `ProjectSession.create/join` (positions per device).
-- [ ] Backup / move to another device: `IdentityBackup.export` shown as a QR code (and as text),
-      `IdentityBackup.import` by scanning it. Explain that a lost device means creating a new
+- [ ] Backup / move to another device: `IdentityExport.export` shown as a QR code (and as text),
+      `IdentityExport.import` by scanning it. Explain that a lost device means creating a new
       identity (one identity per user, copied — decision of 2026-09-29).
 - [ ] Show the user's own fingerprint (`Identity.fingerprint`).
 
@@ -22,7 +24,7 @@ identity export/import, join/create/invite. The real app's design will differ; p
       person; show both fingerprints for comparison.
 - [ ] Sync the contact list (and the list of joined projects: link + password) between the
       devices of one user. Options to decide:
-      - include it in the identity backup (re-export after changes), or
+      - include it in the identity export (re-export after changes), or
       - a personal `SecureChannel` owned by the user, whose password and channel id are derived
         from the identity seed (needs small library hooks: a deterministic channel id for
         `SecureChannel.create`, and a key given directly instead of a password).

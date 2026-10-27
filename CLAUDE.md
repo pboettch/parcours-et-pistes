@@ -13,7 +13,7 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
   - `packages/pep_core/` — `ProjectSession` facade mapping content onto collections
     (`PepCollections`), the apps' API; `pep` CLI.
   Library rules and checks: `packages/CLAUDE.md`.
-- `apps/` — Flutter apps (next). A web GUI proof of concept lives on the unmerged branch `poc-web`
+- `apps/` — Flutter apps (not created yet). A web GUI proof of concept lives on the unmerged branch `poc-web`
   (parts will be reused; the real app's design will differ).
 - `tools/broker/` — development MQTT 5 broker setup.
 - `docs/DESIGN.md` — architecture, crypto, protocol, threat model.
@@ -22,6 +22,7 @@ end-to-end encrypted over an MQTT broker; there is no central user database.
   is a symlink here). Index: `.claude/memory/MEMORY.md`.
 - `.claude/scripts/` — helper scripts for Claude/dev tasks.
 - `.claude/agents/` — subagents (e.g. `protocol-reviewer`: read-only review of library changes).
+- `.claude/reviews/` — summaries of review rounds (findings, what was fixed, what stays open).
 
 ## Conventions
 - Commit often: one commit per logical step; include memory updates in commits.

@@ -4,9 +4,9 @@ import 'errors.dart';
 import 'geo.dart';
 import 'json.dart';
 
-/// All the points recorded by one device of a member (`path` collection): the
-/// full track it republishes as it grows. Points are kept in time order, one
-/// per millisecond.
+/// Points recorded by one device of a member, as published in one `path` item:
+/// a segment of the device's full track (pep_core republishes the open segment
+/// as it grows). Points are kept in time order, one per millisecond.
 ///
 /// Compact JSON, so that a day of points stays small:
 /// `{"v":1, "p":[t, lat, lon, dt, dlat, dlon, …], "extra":{…}?}` — the first point absolute,
@@ -40,7 +40,8 @@ class RecordedPath {
   /// In time order, at most one per millisecond.
   final List<TimedPoint> points;
 
-  /// Fields unknown to this version, preserved on round trip.
+  /// Additional fields (the document's `extra` object), preserved as is on a
+  /// round trip. Other unknown fields are dropped.
   final Json extra;
 
   Json toJson() {

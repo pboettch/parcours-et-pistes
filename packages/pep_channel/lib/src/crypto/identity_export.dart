@@ -13,8 +13,8 @@ import 'pep_crypto.dart';
 /// devices). The result is a short text suitable for a file or a QR code.
 ///
 /// Format: `pepid1.` + base64url(`ops u8 | mem u32 | salt[16] | nonce[24] |
-/// XChaCha20-Poly1305(Argon2id(passphrase), ad = "pepid1", seed[32])`).
-abstract final class IdentityBackup {
+/// XChaCha20-Poly1305(Argon2id(passphrase), ad = "pepid1.", seed[32])`).
+abstract final class IdentityExport {
   static const prefix = 'pepid1.';
 
   static String export(PepCrypto c, Identity identity, String passphrase, {KdfParams? kdf}) {
@@ -44,10 +44,10 @@ abstract final class IdentityBackup {
   }
 
   /// Throws [WrongPasswordException] for a wrong passphrase (or tampered
-  /// backup) and [FormatPepException] for text that is not a backup.
-  static Identity import(PepCrypto c, String backup, String passphrase) {
-    final text = backup.trim();
-    if (!text.startsWith(prefix)) throw const FormatPepException('not an identity backup');
+  /// export) and [FormatPepException] for text that is not an export.
+  static Identity import(PepCrypto c, String exported, String passphrase) {
+    final text = exported.trim();
+    if (!text.startsWith(prefix)) throw const FormatPepException('not an identity export');
     final r = ByteReader(unb64u(text.substring(prefix.length)));
     final p = KdfParams(opsLimit: r.u8(), memLimit: r.u32(), salt: Uint8List.fromList(r.bytes(KdfParams.saltBytes)));
     final nonce = r.bytes(24);

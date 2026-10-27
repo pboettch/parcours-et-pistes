@@ -28,9 +28,9 @@ Three packages in one Dart workspace (root `pubspec.yaml`):
 
 | Package | Responsibility | Depends on |
 |---|---|---|
-| `pep_channel` | Transport (MQTT 5), crypto, envelope, owner-signed metadata and access list, `SecureChannel`: collections of opaque items with writer policies, revisions, tombstones, expiry, sync barrier | sodium, mqtt5_client, archive |
+| `pep_channel` | Transport (MQTT 5), crypto, envelope, owner-signed metadata and access list, `SecureChannel`: collections of opaque items with writer policies, revisions, tombstones, expiry, sync barrier | sodium, mqtt5_client, archive, crypto, typed_data |
 | `pep_content` | `Gpx` (with `pep` extensions), `Position`, `MemberProfile`, `ProjectInfo`, `Run`, `RecordedPath`, `TrailInfo`: data types and byte codecs; geometry (`TrackLine`), progress matching (`TrailProgress`), simulated trails and walks (`simulateTrail`, `TrailWalker`) | xml |
-| `pep_core` | `ProjectSession` facade (the apps' API), `PepCollections` (content ↔ collection mapping), `pep` CLI | both |
+| `pep_core` | `ProjectSession` facade (the apps' API), `PepCollections` (content ↔ collection mapping), `pep` CLI | both (+ `args` for the CLI) |
 
 The channel never interprets item bodies: every security decision uses the topic, the signer
 and the signed envelope header only. **Adding a content type** = a data type in `pep_content` +
@@ -53,16 +53,18 @@ re-signs items whose writer changes; nothing merges or deletes other members' it
 | Signatures | Ed25519; member id = unpadded base64url of the 32-byte public key |
 | Compression | raw deflate, prefixed with the u32 uncompressed length (max 64 MiB) |
 
-KDF parameters read from the broker are bounded (t ≤ 10, m ≤ 256 MiB) against DoS.
+KDF parameters are bounded wherever they are read (`meta`, identity exports): 1 ≤ t ≤ 10,
+8 MiB ≤ m ≤ 256 MiB, against DoS.
 On the web, libsodium runs as `sodium.js` (sumo build, WebAssembly): Argon2id at the default
 parameters takes ~75 ms in Chromium, ~20 ms on the Dart VM (2026 desktop hardware).
 
 ## Identities, roles, trust
 - **One identity per user**, an Ed25519 key pair; the member id (unpadded base64url of the
   public key) is project-independent. The 32-byte seed is kept in secure storage and **copied to
-  the user's other devices** with `IdentityBackup` (Argon2id + XChaCha20-Poly1305 under a
-  passphrase, ~130 characters, QR-friendly). A lost device means the identity must be considered
-  compromised: the user creates a new one and is re-added by friends and projects.
+  the user's other devices** with `IdentityExport` (Argon2id + XChaCha20-Poly1305 under a
+  passphrase, 131 characters, QR-friendly; format under *Wire formats*). A lost device means
+  the identity must be considered compromised: the user creates a new one and is re-added by
+  friends and projects.
 - `fingerprintOf(memberId)`: 80 bits of SHA-256 as `XXXX-XXXX-XXXX-XXXX` (Crockford base32),
   for people to compare when adding each other.
 - **Owner**: the project creator. Signs `meta` and the access list.
@@ -107,19 +109,21 @@ body as a restricted block:
 u8 count | count × (recipient public key[32] | sealed content key[80])
 | nonce[24] | XChaCha20-Poly1305(content key, ad = topic, flags u8 | payload)
 ```
-Other members see that the item exists and who may read it, not its content. Re-sealing
-(reassignment) keeps the block as is, so no one needs to read it.
+Other members see that the item exists and who may read it, not its content. When the owner
+re-signs an item (reassignment to a member who already is a recipient, a changed writer policy),
+the block is kept as is, so no one needs to read it; assigning it to a member who is not a
+recipient publishes a new block that includes them.
 Changing the recipients = publishing a new revision; members dropped from the list lose the item
 (but keep what they already downloaded).
 
 ## Collections of Parcours et Pistes (`PepCollections`)
 | Collection | Item id | Writers | TTL | Body (`pep_content`) |
 |---|---|---|---|---|
-| `info` | `project` | owner | — | `ProjectInfo` JSON: name, desc, disc (`ru`/`mt`), extra |
-| `track` | random | assigned | — | the GPX document (UTF-8), see *Track content* |
+| `info` | `project` | owner | — | `ProjectInfo` JSON: name, desc?, disc (`ru`/`mt`), extra? |
+| `track` | random by default | assigned | — | the GPX document (UTF-8), see *Track content* |
 | `member` | member pseudonym | self | — | `MemberProfile` JSON: name, bot?, extra? |
 | `pos` | member pseudonym [`.tag(device)`] | self | project setting (default 30 min) | `Position` JSON: lat, lon, ts (fix time), alt?, acc?, hdg?, spd? |
-| `run` | random | owner | — | `Run` JSON: track (id), dog, handler?, src [{m: member id, t: since ms}], start?, end?, extra? |
+| `run` | random by default | owner | — | `Run` JSON: track (id), dog, handler?, src? [{m: member id, t: since ms}], start?, end?, extra? |
 | `path_pt` | member pseudonym `.tag(r<slot 0–19>[-device])` | self | — | `Position` JSON: one of the last 20 points recorded by a device, rolling |
 | `path` | member pseudonym `.tag(f<segment>[-device])` | self | — | `RecordedPath` JSON: the points the device recorded, 1000 per segment, `{"v":1, "p":[t, lat, lon, Δt, Δlat, Δlon, …], "extra"?}` (ms, 10⁻⁶ degree; first point absolute, then differences) |
 
@@ -130,11 +134,12 @@ older projects when it joins (`ProjectSession.ensureCollections`).
 A dog carries no phone. Its position is the one shared by a member the project owner designates
 in the run: the official follower of the handler's group, or a **bot** member
 (`MemberProfile.bot`) such as a service feeding a GPS collar (Tractive) into the project with
-its own identity. The designated member can change during the day; `Run.src` keeps every
-change, so the dog's path is the concatenation of each source's path over its period.
+its own identity. The designated member can change during the day; `Run.sources` (JSON `src`)
+keeps every change, so the dog's path is the concatenation of each source's path over its period.
 
 While a member is the source of an unfinished run (default `PathMode.whenSource`), its sessions
-**record** each of its positions (accuracy ≤ 50 m), all three written by the recorder only:
+**record** each of its positions (accuracy ≤ 50 m, or unknown), all three written by the recorder
+only:
 - the live position (`pos`), as for every member;
 - the point on the next of **20 rolling items** (`path_pt`, slot = counter mod 20; the fix times
   give the order): the last ~100 s at one point every 5 s;
@@ -189,15 +194,24 @@ or project. `lp16` = u16 big-endian length prefix. The header gives the channel 
 "collections":{name:{"w":"owner"|"assigned"|"self", "ttl":seconds?}},
 "assign":{collection:{item id: member id}}?}`.
 
-The access list keeps no unknown fields: a new field needs a new version.
+The access list keeps no unknown fields: after the first release, a new field needs a new
+version.
 
-Content bodies are defined by `pep_content` (see the collections table); JSON documents carry
-`"v":1`, unknown fields are preserved, higher versions are rejected.
+Content bodies are defined by `pep_content` (see the collections table). JSON documents carry
+`"v":1` and higher versions are rejected. Every document except `Position` has an optional
+`extra` object, kept as is on a round trip; other unknown fields are dropped.
+
+**Identity export** (`IdentityExport`, a text the user keeps as a backup or moves to another
+device, never published):
+`"pepid1." | b64u(ops u8 | mem u32 (bytes) | salt[16] | nonce[24] | XChaCha20-Poly1305(key, AD =
+"pepid1.", seed[32]))`, 131 characters, key = Argon2id(passphrase, salt, ops, mem). The passphrase
+must not be empty; the parameters are bounded as for `meta`.
 
 ## Track content (GPX)
 Everything related to a track travels **inside the GPX 1.1 document**, which is the item body
 as is; id, revision, publish time and deletion are channel data.
-- Display name / description: `<metadata><name>` / `<desc>` (fallback: first `<trk><name>`).
+- Display name: `<metadata><name>`, else the name of the first track (`<trk>`, else `<rte>`;
+  `Track.name`); description: `<metadata><desc>`.
 - The trail: `<trk>` (and `<rte>`, read as a single-segment track).
 - RU objects: `<wpt>` with `<type>pep:object</type>`.
 - Additional information: custom `<extensions>` sections in the namespace
@@ -212,21 +226,24 @@ as is; id, revision, publish time and deletion are channel data.
 - GPX files from other tools (e.g. Visorando) mark nothing: `objectsFromWaypoints` turns plain
   waypoints that are not at the start or end of the track into objects.
 - Foreign extensions (e.g. Garmin) are preserved on parse → write; each preserved element carries
-  its own namespace declarations. Other unknown elements are dropped when a GPX is rewritten
-  (the GPX string is published byte for byte unless an app rewrites it).
+  its own namespace declarations. Everything else `Gpx` does not model is dropped when a GPX is
+  rewritten: unknown elements, segment extensions, `<link>`, `<author>`, `<copyright>`,
+  `<bounds>`, `<keywords>`, track `<src>`/`<number>`, point fields other than `<ele>`/`<time>`
+  (the GPX string is published byte for byte unless an app rewrites it). Unreadable `<ele>` and
+  `<time>` values are skipped rather than rejected.
 
 ## Client rules
 - Decrypt, verify the signature, then authorize: access list → owner; items → the writer
   policy of their collection. Items of undeclared collections are rejected. Failures are
   reported (`MessageRejected`) and ignored. Content that fails to decode is reported by the
   facade the same way.
-- Ordering: `(rev, time)` from the header; lower or equal versions are ignored (replay
-  protection for clients that saw the newer one). A publisher uses the last known rev + 1. Two
-  writers publishing the same rev at the same millisecond (the owner re-signing while the
-  assignee edits; two devices of one member): the one received last wins, as at the broker
-  (which keeps the last one retained and delivers a topic in one order), so clients converge
-  on the broker's version. Two owner devices changing one run at the same moment still lose
-  one of the two changes (the same one everywhere).
+- Ordering: `(rev, time)` from the header; lower versions, and the same signed content again,
+  are ignored (replay protection for clients that saw the newer one). A publisher uses the last
+  known rev + 1. Two writers publishing the same rev at the same millisecond (the owner
+  re-signing while the assignee edits; two devices of one member): the one received last wins,
+  as at the broker (which keeps the last one retained and delivers a topic in one order), so
+  clients converge on the broker's version. Two owner devices changing one run at the same
+  moment still lose one of the two changes (the same one everywhere).
 - **Reconnecting**: after the transport reconnects, a session subscribes again (if the new
   connection lost the subscription) and waits for a sync barrier before it publishes anything,
   so that it acts on the current access list (e.g. a former assignee learns of a reassignment
@@ -236,10 +253,16 @@ as is; id, revision, publish time and deletion are channel data.
   broker) and reconnects by itself, also after the broker closed it (growing delay, reset after
   a connection that lasted); concurrent `connect()` calls share one connection, and a
   `disconnect()` during a connect aborts it. mqtt5_client may report a socket reset by the
-  broker as an uncaught error: apps and the CLI run in a zone that handles those.
+  broker as an uncaught error: apps must run in a zone that handles those (the CLI does).
 - A session's writes (items, access list) run **one at a time**, in call order. `close` waits
-  (a few seconds at most) for those already called; writes called after `close` or
-  `deleteChannel` fail.
+  (a few seconds at most) for those already called; writes called after `close`, during a
+  `deleteChannel` or after a successful one fail (a failed `deleteChannel` leaves the session
+  open).
+- `close` also clears the ephemeral items the session published (e.g. its position), unless told
+  not to. Expired ephemeral items are pruned every 15 s (`ItemRemoved(expired: true)`).
+- Limits: at most 64 collections and 4096 assignments in the access list, TTLs from 10 s to 7
+  days, at most 255 recipients per restricted item. Bodies over 64 bytes are deflated when that
+  makes them smaller.
 - Revisions above `maxItemRev` (2³² − 1 − 2²⁰) are rejected unless signed by the owner, leaving
   room for the revisions the owner adds when re-signing.
 - Whatever fails while handling a message (invalid format, out-of-range publish time, …) only
@@ -276,8 +299,11 @@ client, e.g. for background location sharing.
 
 TLS: normal certificate validation; for self-hosted brokers with self-signed certificates,
 `BrokerConfig.pinnedCertificates` accepts server certificates by SHA-256 fingerprint (VM only;
-browsers apply their own trust). Broker refusals (bad credentials, ACL-denied publish or
-subscribe) surface as `TransportException`.
+browsers apply their own trust). Broker refusals (bad credentials, ACL-denied publish, refused
+subscribe) surface as `TransportException`; mosquitto accepts ACL-denied subscriptions and
+silently filters what they deliver. One session per channel per `Mqtt5Transport`: a second
+`SecureChannel` of the same channel needs its own transport (on a shared one it gets no retained
+messages, and closing either session unsubscribes both).
 
 ## Broker requirements (production)
 - MQTT 5 with message expiry; retained messages persisted indefinitely; TLS on all listeners.
